@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Doc Checker Agent</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Navigation -->
+        <nav class="navbar">
+            <div class="nav-container">
+                <div class="nav-brand">
+                    <i class="fas fa-brain"></i>
+                    <span>Smart Doc Checker</span>
+                </div>
+                <div class="nav-links">
+                    <button class="nav-btn active" data-page="upload">
+                        <i class="fas fa-upload"></i>
+                        Analyze
+                    </button>
+                    <button class="nav-btn" data-page="dashboard">
+                        <i class="fas fa-chart-line"></i>
+                        Dashboard
+                    </button>
+                    <button class="nav-btn" data-page="monitor">
+                        <i class="fas fa-eye"></i>
+                        Monitor
+                    </button>
+                    <button class="nav-btn" data-page="billing">
+                        <i class="fas fa-credit-card"></i>
+                        Billing
+                    </button>
+                </div>
+                <div class="user-profile">
+                    <div class="user-avatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Upload Page -->
+            <div id="upload-page" class="page active">
+                <div class="page-header">
+                    <h1>Document Analysis</h1>
+                    <p>Upload 2-3 documents to detect contradictions and inconsistencies</p>
+                </div>
+
+                <div class="analysis-container">
+                    <div class="upload-section">
+                        <div class="upload-area" id="upload-area">
+                            <div class="upload-content">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <h3>Drop documents here</h3>
+                                <p>or <span class="browse-link">browse files</span></p>
+                                <small>Supports PDF, DOCX, TXT (max 10MB each)</small>
+                            </div>
+                            <input type="file" id="file-input" multiple accept=".pdf,.docx,.txt" hidden>
+                        </div>
+
+                        <div class="uploaded-files" id="uploaded-files"></div>
+
+                        <div class="analysis-options">
+                            <div class="option-group">
+                                <label>Analysis Type</label>
+                                <select id="analysis-type">
+                                    <option value="comprehensive">Comprehensive Analysis</option>
+                                    <option value="quick">Quick Scan</option>
+                                    <option value="deep">Deep Learning Analysis</option>
+                                </select>
+                            </div>
+                            <div class="option-group">
+                                <label>Sensitivity Level</label>
+                                <div class="sensitivity-slider">
+                                    <input type="range" id="sensitivity" min="1" max="10" value="7">
+                                    <div class="slider-labels">
+                                        <span>Low</span>
+                                        <span>High</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="analyze-btn" id="analyze-btn" disabled>
+                            <i class="fas fa-play"></i>
+                            Analyze Documents
+                        </button>
+                    </div>
+
+                    <div class="cost-estimator">
+                        <div class="cost-card">
+                            <h3>Cost Estimate</h3>
+                            <div class="cost-breakdown">
+                                <div class="cost-item">
+                                    <span>Documents</span>
+                                    <span id="doc-count">0</span>
+                                </div>
+                                <div class="cost-item">
+                                    <span>Document Analysis</span>
+                                    <span id="doc-cost">$0.00</span>
+                                </div>
+                                <div class="cost-item">
+                                    <span>Report Generation</span>
+                                    <span id="report-cost">$0.00</span>
+                                </div>
+                                <div class="cost-total">
+                                    <span>Total</span>
+                                    <span id="total-cost">$0.00</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Analysis Progress -->
+                <div class="analysis-progress" id="analysis-progress" style="display: none;">
+                    <div class="progress-card">
+                        <h3>Analyzing Documents</h3>
+                        <div class="progress-steps">
+                            <div class="progress-step active" data-step="upload">
+                                <i class="fas fa-upload"></i>
+                                <span>Uploading</span>
+                            </div>
+                            <div class="progress-step" data-step="extract">
+                                <i class="fas fa-file-text"></i>
+                                <span>Extracting Text</span>
+                            </div>
+                            <div class="progress-step" data-step="process">
+                                <i class="fas fa-brain"></i>
+                                <span>AI Processing</span>
+                            </div>
+                            <div class="progress-step" data-step="analyze">
+                                <i class="fas fa-search"></i>
+                                <span>Finding Contradictions</span>
+                            </div>
+                            <div class="progress-step" data-step="report">
+                                <i class="fas fa-file-alt"></i>
+                                <span>Generating Report</span>
+                            </div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <div class="progress-text" id="progress-text">Initializing...</div>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                <div class="analysis-results" id="analysis-results" style="display: none;">
+                    <div class="results-header">
+                        <h2>Analysis Complete</h2>
+                        <div class="results-actions">
+                            <button class="action-btn secondary" id="new-analysis-btn">
+                                <i class="fas fa-plus"></i>
+                                New Analysis
+                            </button>
+                            <button class="action-btn primary" id="download-report-btn">
+                                <i class="fas fa-download"></i>
+                                Download Report
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="results-summary">
+                        <div class="summary-card">
+                            <div class="summary-stat">
+                                <h3 id="contradictions-found">0</h3>
+                                <p>Contradictions Found</p>
+                            </div>
+                            <div class="summary-stat">
+                                <h3 id="confidence-score">0%</h3>
+                                <p>Avg Confidence</p>
+                            </div>
+                            <div class="summary-stat">
+                                <h3 id="analysis-time">0s</h3>
+                                <p>Analysis Time</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="contradictions-list" id="contradictions-list">
+                        <!-- Contradictions will be populated here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard Page -->
+            <div id="dashboard-page" class="page">
+                <div class="page-header">
+                    <h1>Analytics Dashboard</h1>
+                    <p>Monitor your document analysis usage and trends</p>
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="dashboard-card">
+                        <div class="card-header">
+                            <h3>Usage Overview</h3>
+                            <i class="fas fa-chart-bar"></i>
+                        </div>
+                        <div class="card-content">
+                            <div class="metric">
+                                <span class="metric-value">247</span>
+                                <span class="metric-label">Documents Analyzed</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-value">84</span>
+                                <span class="metric-label">Reports Generated</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-value">342</span>
+                                <span class="metric-label">Contradictions Found</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card">
+                        <div class="card-header">
+                            <h3>Recent Activity</h3>
+                            <i class="fas fa-history"></i>
+                        </div>
+                        <div class="card-content">
+                            <div class="activity-list">
+                                <div class="activity-item">
+                                    <div class="activity-icon success">
+                                        <i class="fas fa-check"></i>
+                                    </div>
+                                    <div class="activity-content">
+                                        <p>Policy handbook analysis completed</p>
+                                        <small>2 hours ago</small>
+                                    </div>
+                                </div>
+                                <div class="activity-item">
+                                    <div class="activity-icon warning">
+                                        <i class="fas fa-exclamation"></i>
+                                    </div>
+                                    <div class="activity-content">
+                                        <p>5 contradictions detected in course materials</p>
+                                        <small>4 hours ago</small>
+                                    </div>
+                                </div>
+                                <div class="activity-item">
+                                    <div class="activity-icon info">
+                                        <i class="fas fa-info"></i>
+                                    </div>
+                                    <div class="activity-content">
+                                        <p>External policy page updated</p>
+                                        <small>1 day ago</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card">
+                        <div class="card-header">
+                            <h3>Contradiction Types</h3>
+                            <i class="fas fa-pie-chart"></i>
+                        </div>
+                        <div class="card-content">
+                            <div class="chart-container">
+                                <div class="chart-item">
+                                    <div class="chart-bar temporal" style="height: 80%"></div>
+                                    <span>Temporal</span>
+                                </div>
+                                <div class="chart-item">
+                                    <div class="chart-bar numerical" style="height: 60%"></div>
+                                    <span>Numerical</span>
+                                </div>
+                                <div class="chart-item">
+                                    <div class="chart-bar requirement" style="height: 90%"></div>
+                                    <span>Requirement</span>
+                                </div>
+                                <div class="chart-item">
+                                    <div class="chart-bar semantic" style="height: 45%"></div>
+                                    <span>Semantic</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card">
+                        <div class="card-header">
+                            <h3>Performance Metrics</h3>
+                            <i class="fas fa-tachometer-alt"></i>
+                        </div>
+                        <div class="card-content">
+                            <div class="performance-metric">
+                                <span class="metric-label">Avg Analysis Time</span>
+                                <div class="metric-bar">
+                                    <div class="metric-fill" style="width: 75%"></div>
+                                </div>
+                                <span class="metric-value">12.3s</span>
+                            </div>
+                            <div class="performance-metric">
+                                <span class="metric-label">Accuracy Rate</span>
+                                <div class="metric-bar">
+                                    <div class="metric-fill success" style="width: 96%"></div>
+                                </div>
+                                <span class="metric-value">96.4%</span>
+                            </div>
+                            <div class="performance-metric">
+                                <span class="metric-label">System Uptime</span>
+                                <div class="metric-bar">
+                                    <div class="metric-fill success" style="width: 99%"></div>
+                                </div>
+                                <span class="metric-value">99.8%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monitor Page -->
+            <div id="monitor-page" class="page">
+                <div class="page-header">
+                    <h1>External Monitoring</h1>
+                    <p>Track changes in external policy documents and websites</p>
+                </div>
+
+                <div class="monitor-container">
+                    <div class="add-monitor-card">
+                        <h3>Add New Monitor</h3>
+                        <div class="monitor-form">
+                            <div class="form-group">
+                                <label for="monitor-url">URL to Monitor</label>
+                                <input type="url" id="monitor-url" placeholder="https://example.com/policy-page">
+                            </div>
+                            <div class="form-group">
+                                <label for="monitor-name">Monitor Name</label>
+                                <input type="text" id="monitor-name" placeholder="University Policy Page">
+                            </div>
+                            <div class="form-group">
+                                <label for="check-frequency">Check Frequency</label>
+                                <select id="check-frequency">
+                                    <option value="hourly">Every Hour</option>
+                                    <option value="daily" selected>Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                </select>
+                            </div>
+                            <button class="add-monitor-btn">
+                                <i class="fas fa-plus"></i>
+                                Add Monitor
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="monitors-list">
+                        <div class="monitor-card active">
+                            <div class="monitor-header">
+                                <div class="monitor-info">
+                                    <h4>University Academic Policy</h4>
+                                    <p>https://university.edu/academic-policies</p>
+                                </div>
+                                <div class="monitor-status">
+                                    <span class="status-indicator success"></span>
+                                    <span>Active</span>
+                                </div>
+                            </div>
+                            <div class="monitor-details">
+                                <div class="detail-item">
+                                    <span>Last Check</span>
+                                    <span>2 minutes ago</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span>Last Change</span>
+                                    <span>3 days ago</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span>Changes Detected</span>
+                                    <span class="badge warning">2</span>
+                                </div>
+                            </div>
+                            <div class="monitor-actions">
+                                <button class="action-btn secondary small">
+                                    <i class="fas fa-eye"></i>
+                                    View Changes
+                                </button>
+                                <button class="action-btn primary small">
+                                    <i class="fas fa-play"></i>
+                                    Trigger Analysis
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="monitor-card">
+                            <div class="monitor-header">
+                                <div class="monitor-info">
+                                    <h4>HR Employee Handbook</h4>
+                                    <p>https://company.com/hr/handbook</p>
+                                </div>
+                                <div class="monitor-status">
+                                    <span class="status-indicator success"></span>
+                                    <span>Active</span>
+                                </div>
+                            </div>
+                            <div class="monitor-details">
+                                <div class="detail-item">
+                                    <span>Last Check</span>
+                                    <span>5 minutes ago</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span>Last Change</span>
+                                    <span>1 week ago</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span>Changes Detected</span>
+                                    <span class="badge success">0</span>
+                                </div>
+                            </div>
+                            <div class="monitor-actions">
+                                <button class="action-btn secondary small">
+                                    <i class="fas fa-eye"></i>
+                                    View Changes
+                                </button>
+                                <button class="action-btn primary small">
+                                    <i class="fas fa-play"></i>
+                                    Trigger Analysis
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Billing Page -->
+            <div id="billing-page" class="page">
+                <div class="page-header">
+                    <h1>Billing & Usage</h1>
+                    <p>Track your usage and manage billing preferences</p>
+                </div>
+
+                <div class="billing-container">
+                    <div class="billing-overview">
+                        <div class="billing-card current-month">
+                            <div class="billing-header">
+                                <h3>Current Month</h3>
+                                <span class="billing-period">January 2025</span>
+                            </div>
+                            <div class="billing-amount">
+                                <span class="currency">$</span>
+                                <span class="amount">47.80</span>
+                            </div>
+                            <div class="billing-breakdown">
+                                <div class="breakdown-item">
+                                    <span>Documents Analyzed (178 × $0.10)</span>
+                                    <span>$17.80</span>
+                                </div>
+                                <div class="breakdown-item">
+                                    <span>Reports Generated (15 × $2.00)</span>
+                                    <span>$30.00</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="usage-stats">
+                            <div class="stat-card">
+                                <div class="stat-icon">
+                                    <i class="fas fa-file-alt"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h4>178</h4>
+                                    <p>Documents This Month</p>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon">
+                                    <i class="fas fa-chart-line"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h4>15</h4>
+                                    <p>Reports Generated</p>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon">
+                                    <i class="fas fa-clock"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h4>32.5</h4>
+                                    <p>Hours Saved</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="billing-history">
+                        <h3>Billing History</h3>
+                        <div class="history-table">
+                            <div class="table-header">
+                                <div class="table-cell">Period</div>
+                                <div class="table-cell">Documents</div>
+                                <div class="table-cell">Reports</div>
+                                <div class="table-cell">Total</div>
+                                <div class="table-cell">Status</div>
+                            </div>
+                            <div class="table-row">
+                                <div class="table-cell">Dec 2024</div>
+                                <div class="table-cell">156</div>
+                                <div class="table-cell">12</div>
+                                <div class="table-cell">$39.60</div>
+                                <div class="table-cell">
+                                    <span class="badge success">Paid</span>
+                                </div>
+                            </div>
+                            <div class="table-row">
+                                <div class="table-cell">Nov 2024</div>
+                                <div class="table-cell">203</div>
+                                <div class="table-cell">18</div>
+                                <div class="table-cell">$56.30</div>
+                                <div class="table-cell">
+                                    <span class="badge success">Paid</span>
+                                </div>
+                            </div>
+                            <div class="table-row">
+                                <div class="table-cell">Oct 2024</div>
+                                <div class="table-cell">189</div>
+                                <div class="table-cell">14</div>
+                                <div class="table-cell">$46.90</div>
+                                <div class="table-cell">
+                                    <span class="badge success">Paid</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
