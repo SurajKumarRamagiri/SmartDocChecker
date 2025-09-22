@@ -7,7 +7,8 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
+# Node and build
+*/node_modules
 dist
 dist-ssr
 *.local
@@ -22,4 +23,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.env
+
+# Backend ignores
+backend/__pycache__/
+backend/.env
+backend/logs/
+backend/*.sqlite3
+backend/*.db
+backend/.pytest_cache/
+backend/.mypy_cache/

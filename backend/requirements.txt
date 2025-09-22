@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+sqlalchemy
+psycopg2-binary
+redis
+celery
+transformers
+sentence-transformers
+spacy
+weaviate-client
+pytest
+loguru

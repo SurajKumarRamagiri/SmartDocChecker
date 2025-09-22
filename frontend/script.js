@@ -297,43 +297,43 @@ class SmartDocChecker {
         });
     }
     
-    generateAnalysisResults() {
-        // Simulate AI-generated contradictions
-        const sampleContradictions = [
-            {
-                type: 'temporal',
-                severity: 'high',
-                confidence: 94,
-                document1: { name: 'Student Handbook.pdf', text: 'Assignment submissions are due at 10:00 PM EST' },
-                document2: { name: 'Course Syllabus.docx', text: 'All assignments must be submitted by midnight (12:00 AM) EST' },
-                explanation: 'Conflicting deadline times detected. Student Handbook specifies 10:00 PM while Course Syllabus indicates midnight.'
-            },
-            {
-                type: 'requirement',
-                severity: 'medium',
-                confidence: 87,
-                document1: { name: 'Student Handbook.pdf', text: 'Attendance at all lectures is mandatory for course completion' },
-                document2: { name: 'Course Syllabus.docx', text: 'Students may miss up to 2 lectures without penalty' },
-                explanation: 'Contradictory attendance requirements. One document states mandatory attendance while the other allows absences.'
-            },
-            {
-                type: 'numerical',
-                severity: 'high',
-                confidence: 96,
-                document1: { name: 'Course Syllabus.docx', text: 'Late submissions will incur a 5% penalty per day' },
-                document2: { name: 'Grading Policy.txt', text: 'Late penalty is 10% per day for the first week' },
-                explanation: 'Different penalty rates specified for late submissions: 5% vs 10% per day.'
+    async generateAnalysisResults() {
+        // Prepare form data for backend
+        const formData = new FormData();
+        this.uploadedFiles.forEach((fileObj, idx) => {
+            formData.append('files', fileObj.file, fileObj.name);
+        });
+
+        try {
+            const startTime = performance.now();
+            const response = await fetch('/api/analyze', {
+                method: 'POST',
+                body: formData
+            });
+            if (!response.ok) {
+                throw new Error('Analysis failed.');
             }
-        ];
-        
-        this.analysisResults = {
-            contradictions: sampleContradictions,
-            totalContradictions: sampleContradictions.length,
-            averageConfidence: Math.round(sampleContradictions.reduce((sum, c) => sum + c.confidence, 0) / sampleContradictions.length),
-            analysisTime: '12.3s',
-            timestamp: new Date().toISOString()
-        };
-        
+            const result = await response.json();
+            const endTime = performance.now();
+
+            // Expecting result: { contradictions: [...], ... }
+            this.analysisResults = {
+                contradictions: result.contradictions || [],
+                totalContradictions: result.contradictions ? result.contradictions.length : 0,
+                averageConfidence: result.averageConfidence || 0,
+                analysisTime: ((endTime - startTime) / 1000).toFixed(2) + 's',
+                timestamp: new Date().toISOString()
+            };
+        } catch (err) {
+            this.showNotification('Failed to analyze documents: ' + err.message, 'error');
+            this.analysisResults = {
+                contradictions: [],
+                totalContradictions: 0,
+                averageConfidence: 0,
+                analysisTime: '0s',
+                timestamp: new Date().toISOString()
+            };
+        }
         this.renderAnalysisResults();
     }
     
