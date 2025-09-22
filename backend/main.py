@@ -1,7 +1,7 @@
 # Document analysis endpoint
 from fastapi import UploadFile, File
 from typing import List
-import time
+import time,chardet
 
 
 import uvicorn
@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import logging
+from ai_engine import detect_contradiction, semantic_similarity, extract_entities
 
 app = FastAPI(title="SmartDocChecker API", description="Enterprise-grade contradiction detection API", version="1.0.0")
 
@@ -92,43 +93,36 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.close()
 
 @app.post("/api/analyze")
-async def analyze_documents(files: List[UploadFile] = File(...)):
-    start = time.time()
-    # TODO: Replace with real AI analysis logic
-    # For now, simulate analysis and return sample contradictions
-    sample_contradictions = [
-        {
-            "type": "temporal",
-            "severity": "high",
-            "confidence": 94,
-            "document1": {"name": files[0].filename if len(files) > 0 else "Doc1", "text": "Assignment submissions are due at 10:00 PM EST"},
-            "document2": {"name": files[1].filename if len(files) > 1 else "Doc2", "text": "All assignments must be submitted by midnight (12:00 AM) EST"},
-            "explanation": "Conflicting deadline times detected."
-        },
-        {
-            "type": "requirement",
-            "severity": "medium",
-            "confidence": 87,
-            "document1": {"name": files[0].filename if len(files) > 0 else "Doc1", "text": "Attendance at all lectures is mandatory for course completion"},
-            "document2": {"name": files[1].filename if len(files) > 1 else "Doc2", "text": "Students may miss up to 2 lectures without penalty"},
-            "explanation": "Contradictory attendance requirements."
-        },
-        {
-            "type": "numerical",
-            "severity": "high",
-            "confidence": 96,
-            "document1": {"name": files[1].filename if len(files) > 1 else "Doc2", "text": "Late submissions will incur a 5% penalty per day"},
-            "document2": {"name": files[2].filename if len(files) > 2 else "Doc3", "text": "Late penalty is 10% per day for the first week"},
-            "explanation": "Different penalty rates specified for late submissions."
-        }
-    ]
-    avg_conf = round(sum(c["confidence"] for c in sample_contradictions) / len(sample_contradictions))
-    analysis_time = f"{time.time() - start:.2f}s"
-    return {
-        "contradictions": sample_contradictions,
-        "averageConfidence": avg_conf,
-        "analysisTime": analysis_time
-    }
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+async def analyze(files: list[UploadFile] = File(...)):
+    texts = []
+    for file in files:
+        content = await file.read()
+        detected = chardet.detect(content)
+        encoding = detected['encoding']
+        
+        try:
+            if encoding:
+                text = content.decode(encoding)
+            else:
+                # Fallback to UTF-8 with error handling
+                text = content.decode('utf-8', errors='ignore')
+        except UnicodeDecodeError:
+            # Handle as binary or skip
+            text = content.decode('utf-8', errors='replace')
+        
+        texts.append(text)
+    results = []
+    for i in range(len(texts)):
+        for j in range(i+1, len(texts)):
+            contradiction = detect_contradiction(texts[i], texts[j])
+            similarity = semantic_similarity(texts[i], texts[j])
+            entities_i = extract_entities(texts[i])
+            entities_j = extract_entities(texts[j])
+            results.append({
+                "doc_pair": [i, j],
+                "contradiction_score": contradiction,
+                "similarity_score": similarity,
+                "entities_doc1": entities_i,
+                "entities_doc2": entities_j
+            })
+    return {"contradictions": results}

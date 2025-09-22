@@ -12,3 +12,7 @@ spacy
 weaviate-client
 pytest
 loguru
+torch
+chardet
+tittoken
+sentencepiece
