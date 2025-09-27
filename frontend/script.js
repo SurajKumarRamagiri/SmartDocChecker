@@ -4,8 +4,9 @@ class SmartDocChecker {
         this.uploadedFiles = [];
         this.analysisResults = null;
         this.totalCost = 0;
+        this.accumulatedDocCost = 0;
+        this.accumulatedReportCost = 0;
         this.isAnalyzing = false;
-        
         this.init();
     }
     
@@ -87,6 +88,28 @@ class SmartDocChecker {
         });
         document.getElementById(`${pageId}-page`).classList.add('active');
         
+        // Sync billing info when switching to billing page
+        if (pageId === 'billing') {
+            // Update billing amount and breakdown
+            const docCount = this.uploadedFiles.length;
+            const docCost = this.accumulatedDocCost;
+            const reportCount = this.accumulatedReportCost / 2.0;
+            const reportCost = this.accumulatedReportCost;
+            const totalCost = docCost + reportCost;
+            // Current month amount
+            const billingAmount = document.querySelector('#billing-page .billing-amount .amount');
+            if (billingAmount) billingAmount.textContent = totalCost.toFixed(2);
+            // Breakdown
+            const docBreakdown = document.querySelector('#billing-page .billing-breakdown .breakdown-item:nth-child(1) span:last-child');
+            if (docBreakdown) docBreakdown.textContent = `$${docCost.toFixed(2)}`;
+            const reportBreakdown = document.querySelector('#billing-page .billing-breakdown .breakdown-item:nth-child(2) span:last-child');
+            if (reportBreakdown) reportBreakdown.textContent = `$${reportCost.toFixed(2)}`;
+            // Usage stats
+            const docStat = document.querySelector('#billing-page .usage-stats .stat-card:nth-child(1) h4');
+            if (docStat) docStat.textContent = docCount;
+            const reportStat = document.querySelector('#billing-page .usage-stats .stat-card:nth-child(2) h4');
+            if (reportStat) reportStat.textContent = reportCount;
+        }
         this.currentPage = pageId;
     }
     
@@ -182,17 +205,17 @@ class SmartDocChecker {
     }
     
     updateCostEstimate() {
-        const docCount = this.uploadedFiles.length;
-        const docCost = docCount * 0.10;
-        const reportCost = docCount > 0 ? 2.00 : 0;
-        const totalCost = docCost + reportCost;
-        
-        document.getElementById('doc-count').textContent = docCount;
-        document.getElementById('doc-cost').textContent = `$${docCost.toFixed(2)}`;
-        document.getElementById('report-cost').textContent = `$${reportCost.toFixed(2)}`;
-        document.getElementById('total-cost').textContent = `$${totalCost.toFixed(2)}`;
-        
-        this.totalCost = totalCost;
+    const docCount = this.uploadedFiles.length;
+    const docCost = this.accumulatedDocCost;
+    const reportCost = this.accumulatedReportCost;
+    const totalCost = docCost + reportCost;
+
+    document.getElementById('doc-count').textContent = docCount;
+    document.getElementById('doc-cost').textContent = `$${docCost.toFixed(2)}`;
+    document.getElementById('report-cost').textContent = `$${reportCost.toFixed(2)}`;
+    document.getElementById('total-cost').textContent = `$${totalCost.toFixed(2)}`;
+
+    this.totalCost = totalCost;
     }
     
     checkAnalyzeButton() {
@@ -217,6 +240,10 @@ class SmartDocChecker {
             this.runAnalysisSteps(),
             this.generateAnalysisResults()
         ]);
+        // On successful analysis, accumulate doc cost
+        const docCount = this.uploadedFiles.length;
+        this.accumulatedDocCost += docCount * 0.10;
+        this.updateCostEstimate();
         
         // Show results
         document.getElementById('analysis-progress').style.display = 'none';
@@ -344,7 +371,13 @@ class SmartDocChecker {
     renderAnalysisResults() {
         // Update summary
         document.getElementById('contradictions-found').textContent = this.analysisResults.totalContradictions || 0;
-        document.getElementById('confidence-score').textContent = `${this.analysisResults.averageConfidence?.toFixed(2) || 0}%`;
+    // Convert average confidence to -1 to 1 scale if needed, clamp, then map to 50%-100%
+    let avgConf = this.analysisResults.averageConfidence;
+    if (Math.abs(avgConf) > 1) avgConf = avgConf / 100;
+    avgConf = Math.max(-1, Math.min(1, avgConf));
+    // Map -1 to 1 to 50% to 100%
+    let avgConfPercent = 50 + ((avgConf + 1) / 2) * 50;
+    document.getElementById('confidence-score').textContent = `${avgConfPercent.toFixed(2)}%`;
         document.getElementById('analysis-time').textContent = this.analysisResults.analysisTime || '';
 
         // Render contradictions list
@@ -366,6 +399,11 @@ class SmartDocChecker {
             const contradictionElement = document.createElement('div');
             contradictionElement.className = 'contradiction-item';
 
+            // Convert confidence to -1 to 1 scale, clamp, then map to 50%-100% for display
+            let confidence = contradiction.sentence_contradiction_score;
+            if (Math.abs(confidence) > 1) confidence = confidence / 100;
+            confidence = Math.max(-1, Math.min(1, confidence));
+            let confidencePercent = 50 + ((confidence + 1) / 2) * 50;
             contradictionElement.innerHTML = `
                 <div class="contradiction-header">
                     <div class="contradiction-type">
@@ -375,9 +413,9 @@ class SmartDocChecker {
                     <div class="confidence-score">
                         <span>Confidence:</span>
                         <div class="confidence-bar">
-                            <div class="confidence-fill" style="width: ${Math.min(Math.abs(contradiction.sentence_contradiction_score) * 10, 100)}%"></div>
+                            <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
                         </div>
-                        <span>${contradiction.sentence_contradiction_score.toFixed(2)}</span>
+                        <span>${confidencePercent.toFixed(2)}%</span>
                     </div>
                 </div>
                 <div class="contradiction-content">
@@ -400,9 +438,10 @@ class SmartDocChecker {
 
     
     resetAnalysis() {
-        this.uploadedFiles = [];
-        this.analysisResults = null;
-        this.isAnalyzing = false;
+    this.uploadedFiles = [];
+    this.analysisResults = null;
+    this.isAnalyzing = false;
+    this.accumulatedDocCost = 0;
         
         document.getElementById('uploaded-files').innerHTML = '';
         document.getElementById('analysis-progress').style.display = 'none';
@@ -418,9 +457,15 @@ class SmartDocChecker {
     }
     
     downloadReport() {
-        if (!this.analysisResults) return;
-        
-        this.generatePDFReport();
+    if (!this.analysisResults) return;
+
+    // Add report cost only when downloading, and accumulate it
+    const docCount = this.uploadedFiles.length;
+    const reportCost = docCount > 0 ? 2.00 : 0;
+    this.accumulatedReportCost += reportCost;
+    this.updateCostEstimate();
+
+    this.generatePDFReport();
     }
     
     async generatePDFReport() {
