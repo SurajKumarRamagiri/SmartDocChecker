@@ -32,4 +32,5 @@ backend/*.sqlite3
 backend/*.db
 backend/.pytest_cache/
 backend/.mypy_cache/
-backend/venv
+
+venv/

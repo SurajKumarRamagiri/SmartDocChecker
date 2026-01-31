@@ -4,9 +4,8 @@ class SmartDocChecker {
         this.uploadedFiles = [];
         this.analysisResults = null;
         this.totalCost = 0;
-        this.accumulatedDocCost = 0;
-        this.accumulatedReportCost = 0;
         this.isAnalyzing = false;
+        
         this.init();
     }
     
@@ -88,32 +87,6 @@ class SmartDocChecker {
         });
         document.getElementById(`${pageId}-page`).classList.add('active');
         
-        // Sync billing info when switching to billing page
-        if (pageId === 'billing') {
-            // Update billing amount and breakdown
-            const docCount = this.uploadedFiles.length;
-            const docCost = this.accumulatedDocCost;
-            const reportCount = this.accumulatedReportCost / 2.0;
-            const reportCost = this.accumulatedReportCost;
-            const totalCost = docCost + reportCost;
-            // Current month amount
-            const billingAmount = document.querySelector('#billing-page .billing-amount .amount');
-            if (billingAmount) billingAmount.textContent = totalCost.toFixed(2);
-            // Breakdown
-            const docBreakdown = document.querySelector('#billing-page .billing-breakdown .breakdown-item:nth-child(1) span:last-child');
-            if (docBreakdown) docBreakdown.textContent = `$${docCost.toFixed(2)}`;
-            const reportBreakdown = document.querySelector('#billing-page .billing-breakdown .breakdown-item:nth-child(2) span:last-child');
-            if (reportBreakdown) reportBreakdown.textContent = `$${reportCost.toFixed(2)}`;
-            // Usage stats
-            const docStat = document.querySelector('#billing-page .usage-stats .stat-card:nth-child(1) h4');
-            if (docStat) docStat.textContent = docCount;
-            const reportStat = document.querySelector('#billing-page .usage-stats .stat-card:nth-child(2) h4');
-            if (reportStat) reportStat.textContent = reportCount;
-            // Hours Saved
-            const hoursSaved = this.calculateTimeSaved(docCount);
-            const hoursSavedStat = document.querySelector('#billing-page .usage-stats .stat-card:nth-child(3) h4');
-            if (hoursSavedStat) hoursSavedStat.textContent = hoursSaved;
-        }
         this.currentPage = pageId;
     }
     
@@ -209,17 +182,17 @@ class SmartDocChecker {
     }
     
     updateCostEstimate() {
-    const docCount = this.uploadedFiles.length;
-    const docCost = this.accumulatedDocCost;
-    const reportCost = this.accumulatedReportCost;
-    const totalCost = docCost + reportCost;
-
-    document.getElementById('doc-count').textContent = docCount;
-    document.getElementById('doc-cost').textContent = `$${docCost.toFixed(2)}`;
-    document.getElementById('report-cost').textContent = `$${reportCost.toFixed(2)}`;
-    document.getElementById('total-cost').textContent = `$${totalCost.toFixed(2)}`;
-
-    this.totalCost = totalCost;
+        const docCount = this.uploadedFiles.length;
+        const docCost = docCount * 0.10;
+        const reportCost = docCount > 0 ? 2.00 : 0;
+        const totalCost = docCost + reportCost;
+        
+        document.getElementById('doc-count').textContent = docCount;
+        document.getElementById('doc-cost').textContent = `$${docCost.toFixed(2)}`;
+        document.getElementById('report-cost').textContent = `$${reportCost.toFixed(2)}`;
+        document.getElementById('total-cost').textContent = `$${totalCost.toFixed(2)}`;
+        
+        this.totalCost = totalCost;
     }
     
     checkAnalyzeButton() {
@@ -240,19 +213,15 @@ class SmartDocChecker {
         document.getElementById('analysis-progress').style.display = 'block';
         document.getElementById('analysis-results').style.display = 'none';
         
-        await Promise.all([
-            this.runAnalysisSteps(),
-            this.generateAnalysisResults()
-        ]);
-        // On successful analysis, accumulate doc cost
-        const docCount = this.uploadedFiles.length;
-        this.accumulatedDocCost += docCount * 0.10;
-        this.updateCostEstimate();
+        // Simulate analysis steps
+        await this.runAnalysisSteps();
+        
+        // Generate results
+        this.generateAnalysisResults();
         
         // Show results
         document.getElementById('analysis-progress').style.display = 'none';
         document.getElementById('analysis-results').style.display = 'block';
-        this.renderAnalysisResults();
         
         this.isAnalyzing = false;
         this.checkAnalyzeButton();
@@ -345,20 +314,16 @@ class SmartDocChecker {
                 throw new Error('Analysis failed.');
             }
             const result = await response.json();
-            const summary = result[result.length - 1];
-            const contradictions = result.slice(0, -1);
-
             const endTime = performance.now();
 
-            
+            // Expecting result: { contradictions: [...], ... }
             this.analysisResults = {
-                contradictions: contradictions || [],
-                totalContradictions: summary.totalContradictions || 0,
-                averageConfidence: summary.averageConfidence || 0,
+                contradictions: result.contradictions || [],
+                totalContradictions: result.contradictions ? result.contradictions.length : 0,
+                averageConfidence: result.averageConfidence || 0,
                 analysisTime: ((endTime - startTime) / 1000).toFixed(2) + 's',
                 timestamp: new Date().toISOString()
             };
-            // console.log(this.analysisResults);
         } catch (err) {
             this.showNotification('Failed to analyze documents: ' + err.message, 'error');
             this.analysisResults = {
@@ -369,69 +334,48 @@ class SmartDocChecker {
                 timestamp: new Date().toISOString()
             };
         }
-        // this.renderAnalysisResults();
+        this.renderAnalysisResults();
     }
     
     renderAnalysisResults() {
         // Update summary
-        document.getElementById('contradictions-found').textContent = this.analysisResults.totalContradictions || 0;
-    // Convert average confidence to -1 to 1 scale if needed, clamp, then map to 50%-100%
-    let avgConf = this.analysisResults.averageConfidence;
-    if (Math.abs(avgConf) > 1) avgConf = avgConf / 100;
-    avgConf = Math.max(-1, Math.min(1, avgConf));
-    // Map -1 to 1 to 50% to 100%
-    let avgConfPercent = 50 + ((avgConf + 1) / 2) * 50;
-    document.getElementById('confidence-score').textContent = `${avgConfPercent.toFixed(2)}%`;
-        document.getElementById('analysis-time').textContent = this.analysisResults.analysisTime || '';
-
+        document.getElementById('contradictions-found').textContent = this.analysisResults.totalContradictions;
+        document.getElementById('confidence-score').textContent = `${this.analysisResults.averageConfidence}%`;
+        document.getElementById('analysis-time').textContent = this.analysisResults.analysisTime;
+        
         // Render contradictions list
         const container = document.getElementById('contradictions-list');
         container.innerHTML = '';
-
-        // Flatten all contradiction pairs from the nested structure
-        let allPairs = [];
-        this.analysisResults.contradictions.forEach((docPair) => {
-            if (docPair.contradiction_pairs) {
-                allPairs = allPairs.concat(docPair.contradiction_pairs.map(pair => ({
-                    ...pair,
-                    docPair: docPair.doc_pair
-                })));
-            }
-        });
-
-        allPairs.forEach((contradiction, index) => {
+        
+        this.analysisResults.contradictions.forEach((contradiction, index) => {
             const contradictionElement = document.createElement('div');
             contradictionElement.className = 'contradiction-item';
-
-            // Convert confidence to -1 to 1 scale, clamp, then map to 50%-100% for display
-            let confidence = contradiction.sentence_contradiction_score;
-            if (Math.abs(confidence) > 1) confidence = confidence / 100;
-            confidence = Math.max(-1, Math.min(1, confidence));
-            let confidencePercent = 50 + ((confidence + 1) / 2) * 50;
             contradictionElement.innerHTML = `
                 <div class="contradiction-header">
                     <div class="contradiction-type">
-                        <span class="type-badge">${contradiction.entity_doc1[1]}</span>
-                        <span class="severity-badge low">low</span>
+                        <span class="type-badge ${contradiction.type}">${contradiction.type}</span>
+                        <span class="severity-badge ${contradiction.severity}">${contradiction.severity}</span>
                     </div>
                     <div class="confidence-score">
                         <span>Confidence:</span>
                         <div class="confidence-bar">
-                            <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
+                            <div class="confidence-fill" style="width: ${contradiction.confidence}%"></div>
                         </div>
-                        <span>${confidencePercent.toFixed(2)}%</span>
+                        <span>${contradiction.confidence}%</span>
                     </div>
                 </div>
+                
                 <div class="contradiction-content">
                     <div class="document-snippet">
-                        <h4>Document ${contradiction.docPair[0] + 1}</h4>
-                        <p><b>Contradicted Sentence:</b> "${contradiction.sentence_doc1}"</p>
+                        <h4>${contradiction.document1.name}</h4>
+                        <p>"${contradiction.document1.text}"</p>
                     </div>
                     <div class="document-snippet">
-                        <h4>Document ${contradiction.docPair[1] + 1}</h4>
-                        <p><b>Contradicted Sentence:</b> "${contradiction.sentence_doc2}"</p>
+                        <h4>${contradiction.document2.name}</h4>
+                        <p>"${contradiction.document2.text}"</p>
                     </div>
                 </div>
+                
                 <div class="contradiction-explanation">
                     <p>${contradiction.explanation}</p>
                 </div>
@@ -439,13 +383,11 @@ class SmartDocChecker {
             container.appendChild(contradictionElement);
         });
     }
-
     
     resetAnalysis() {
-    this.uploadedFiles = [];
-    this.analysisResults = null;
-    this.isAnalyzing = false;
-    this.accumulatedDocCost = 0;
+        this.uploadedFiles = [];
+        this.analysisResults = null;
+        this.isAnalyzing = false;
         
         document.getElementById('uploaded-files').innerHTML = '';
         document.getElementById('analysis-progress').style.display = 'none';
@@ -461,29 +403,23 @@ class SmartDocChecker {
     }
     
     downloadReport() {
-    if (!this.analysisResults) return;
-
-    // Add report cost only when downloading, and accumulate it
-    const docCount = this.uploadedFiles.length;
-    const reportCost = docCount > 0 ? 2.00 : 0;
-    this.accumulatedReportCost += reportCost;
-    this.updateCostEstimate();
-
-    this.generatePDFReport();
+        if (!this.analysisResults) return;
+        
+        this.generatePDFReport();
     }
     
     async generatePDFReport() {
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF('p', 'mm', 'a4');
-
-        // Constants
+        
+        // PDF styling constants
         const pageWidth = pdf.internal.pageSize.getWidth();
         const pageHeight = pdf.internal.pageSize.getHeight();
         const margin = 20;
         const contentWidth = pageWidth - (margin * 2);
         let yPosition = margin;
-
-        // Helper functions same as before
+        
+        // Helper function to add new page if needed
         const checkPageBreak = (requiredHeight = 20) => {
             if (yPosition + requiredHeight > pageHeight - margin) {
                 pdf.addPage();
@@ -492,138 +428,253 @@ class SmartDocChecker {
             }
             return false;
         };
-
+        
+        // Helper function to wrap text
         const wrapText = (text, maxWidth, fontSize = 10) => {
             pdf.setFontSize(fontSize);
             return pdf.splitTextToSize(text, maxWidth);
         };
-
-        // Header Section: same as your existing code for title, logo, metadata etc.
-
-        // ---------------------------------------------------------------
+        
+        // Header
+        pdf.setFillColor(37, 99, 235); // Primary blue
+        pdf.rect(0, 0, pageWidth, 40, 'F');
+        
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(24);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('Smart Doc Checker', margin, 25);
+        
+        pdf.setFontSize(12);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text('Document Contradiction Analysis Report', margin, 32);
+        
+        yPosition = 55;
+        
+        // Report metadata
+        pdf.setTextColor(0, 0, 0);
+        pdf.setFontSize(10);
+        pdf.setFont('helvetica', 'normal');
+        
+        const reportDate = new Date().toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        pdf.text(`Generated: ${reportDate}`, margin, yPosition);
+        pdf.text(`Analysis Engine: Smart Doc Checker AI v2.1`, margin, yPosition + 5);
+        pdf.text(`Total Cost: $${this.totalCost.toFixed(2)}`, margin, yPosition + 10);
+        
+        yPosition += 25;
+        
         // Executive Summary
         checkPageBreak(40);
         pdf.setFontSize(16);
         pdf.setFont('helvetica', 'bold');
         pdf.setTextColor(37, 99, 235);
         pdf.text('Executive Summary', margin, yPosition);
+        
         yPosition += 10;
-
+        
+        // Summary box
         pdf.setFillColor(248, 250, 252);
         pdf.setDrawColor(226, 232, 240);
         pdf.rect(margin, yPosition, contentWidth, 35, 'FD');
-
+        
         pdf.setTextColor(0, 0, 0);
         pdf.setFontSize(12);
         pdf.setFont('helvetica', 'normal');
-
+        
         const summaryY = yPosition + 8;
         pdf.text(`Documents Analyzed: ${this.uploadedFiles.length}`, margin + 5, summaryY);
-
-        // Use analysisResults object properties for summary
-        pdf.text(`Contradictions Found: ${this.analysisResults?.totalContradictions ?? 0}`, margin + 5, summaryY + 7);
-        pdf.text(`Average Confidence: ${typeof this.analysisResults?.averageConfidence === 'number' ? this.analysisResults.averageConfidence.toFixed(2) : '0.00'}%`, margin + 5, summaryY + 14);
-        pdf.text(`Analysis Time: ${this.analysisResults?.analysisTime ?? ''}`, margin + 5, summaryY + 21);
-
+        pdf.text(`Contradictions Found: ${this.analysisResults.totalContradictions}`, margin + 5, summaryY + 7);
+        pdf.text(`Average Confidence: ${this.analysisResults.averageConfidence}%`, margin + 5, summaryY + 14);
+        pdf.text(`Analysis Time: ${this.analysisResults.analysisTime}`, margin + 5, summaryY + 21);
+        
         yPosition += 50;
-
-        // Documents Analyzed: same as your code...
-
-        // ---------------------------------------------------------------
-        // Contradictions Detected
-        const contradictionsList = this.analysisResults?.contradictions ?? [];
-        if (contradictionsList.length > 0) {
+        
+        // Documents Analyzed
+        checkPageBreak(30);
+        pdf.setFontSize(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setTextColor(37, 99, 235);
+        pdf.text('Documents Analyzed', margin, yPosition);
+        
+        yPosition += 10;
+        
+        this.uploadedFiles.forEach((file, index) => {
+            checkPageBreak(15);
+            pdf.setFontSize(11);
+            pdf.setFont('helvetica', 'bold');
+            pdf.setTextColor(0, 0, 0);
+            pdf.text(`${index + 1}. ${file.name}`, margin + 5, yPosition);
+            
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(10);
+            pdf.setTextColor(100, 116, 139);
+            pdf.text(`Size: ${file.size} | Type: ${file.file.type}`, margin + 10, yPosition + 5);
+            
+            yPosition += 15;
+        });
+        
+        yPosition += 10;
+        
+        // Contradictions Found
+        if (this.analysisResults.contradictions.length > 0) {
             checkPageBreak(30);
             pdf.setFontSize(14);
             pdf.setFont('helvetica', 'bold');
             pdf.setTextColor(37, 99, 235);
             pdf.text('Contradictions Detected', margin, yPosition);
-
+            
             yPosition += 15;
-
-            contradictionsList.forEach((docPair, pairIdx) => {
-                if (!docPair.contradiction_pairs) return;
-
-                docPair.contradiction_pairs.forEach((contradiction, index) => {
-                    checkPageBreak(70);
-
-                    // Draw contradiction header box
-                    pdf.setFillColor(254, 242, 242);
-                    pdf.setDrawColor(239, 68, 68);
-                    pdf.rect(margin, yPosition, contentWidth, 10, 'FD');
-
-                    pdf.setFontSize(12);
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.setTextColor(220, 38, 38);
-                    pdf.text(`Contradiction #${pairIdx + 1}.${index + 1}`, margin + 3, yPosition + 7);
-
-                    // Entity type badge
-                    pdf.setFontSize(9);
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.setFillColor(243, 244, 246);
-                    pdf.setTextColor(51, 65, 85);
-                    pdf.rect(margin + 80, yPosition + 2, 40, 5, 'F');
-                    pdf.text(contradiction.entity_doc1[1].toUpperCase(), margin + 82, yPosition + 6);
-
-                    // Confidence score
-                    pdf.setFillColor(255, 255, 255);
-                    pdf.setTextColor(0, 0, 0);
-                    pdf.text(`Confidence: ${contradiction.sentence_contradiction_score.toFixed(2)}`, margin + contentWidth - 50, yPosition + 6);
-
-                    yPosition += 15;
-
-                    // Document 1 snippet
-                    pdf.setFontSize(10);
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.setTextColor(0, 0, 0);
-                    pdf.text(`Document ${docPair.doc_pair[0] + 1}:`, margin + 5, yPosition);
-                    pdf.setFont('helvetica', 'normal');
-                    pdf.setFontSize(9);
-                    pdf.setTextColor(100, 116, 139);
-                    pdf.text(wrapText(`"${contradiction.sentence_doc1}"`, contentWidth - 10, 9), margin + 10, yPosition + 5);
-
-                    yPosition += 35;
-
-                    // Document 2 snippet
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.setTextColor(0, 0, 0);
-                    pdf.text(`Document ${docPair.doc_pair[1] + 1}:`, margin + 5, yPosition);
-                    pdf.setFont('helvetica', 'normal');
-                    pdf.setFontSize(9);
-                    pdf.setTextColor(100, 116, 139);
-                    pdf.text(wrapText(`"${contradiction.sentence_doc2}"`, contentWidth - 10, 9), margin + 10, yPosition + 5);
-
-                    yPosition += 35;
-
-                    // Explanation box
-                    checkPageBreak(20);
-                    pdf.setFillColor(255, 251, 235);
-                    pdf.setDrawColor(245, 158, 11);
-                    const explanationText = wrapText(contradiction.explanation, contentWidth - 10, 9);
-                    const explanationHeight = explanationText.length * 5;
-                    pdf.rect(margin, yPosition, contentWidth, explanationHeight, 'FD');
-                    pdf.setFontSize(9);
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.setTextColor(146, 64, 14);
-                    pdf.text('Analysis:', margin + 3, yPosition + 5);
-
-                    pdf.setFont('helvetica', 'normal');
-                    pdf.text(explanationText, margin + 3, yPosition + 10);
-
-                    yPosition += explanationHeight + 15;
-                });
+            
+            this.analysisResults.contradictions.forEach((contradiction, index) => {
+                checkPageBreak(60);
+                
+                // Contradiction header
+                pdf.setFillColor(254, 242, 242);
+                pdf.setDrawColor(239, 68, 68);
+                pdf.rect(margin, yPosition, contentWidth, 8, 'FD');
+                
+                pdf.setFontSize(12);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setTextColor(220, 38, 38);
+                pdf.text(`Contradiction #${index + 1}`, margin + 3, yPosition + 5);
+                
+                // Type and severity badges
+                const typeColor = this.getTypeColor(contradiction.type);
+                const severityColor = this.getSeverityColor(contradiction.severity);
+                
+                pdf.setFontSize(9);
+                pdf.setFont('helvetica', 'bold');
+                
+                // Type badge
+                pdf.setFillColor(...typeColor.bg);
+                pdf.setTextColor(...typeColor.text);
+                pdf.rect(margin + 80, yPosition + 1, 25, 6, 'F');
+                pdf.text(contradiction.type.toUpperCase(), margin + 82, yPosition + 4.5);
+                
+                // Severity badge
+                pdf.setFillColor(...severityColor.bg);
+                pdf.setTextColor(...severityColor.text);
+                pdf.rect(margin + 110, yPosition + 1, 25, 6, 'F');
+                pdf.text(contradiction.severity.toUpperCase(), margin + 112, yPosition + 4.5);
+                
+                // Confidence score
+                pdf.setTextColor(0, 0, 0);
+                pdf.text(`Confidence: ${contradiction.confidence}%`, margin + 140, yPosition + 4.5);
+                
+                yPosition += 15;
+                
+                // Document snippets
+                pdf.setFontSize(10);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setTextColor(0, 0, 0);
+                pdf.text('Document 1:', margin + 5, yPosition);
+                
+                pdf.setFont('helvetica', 'normal');
+                pdf.setFontSize(9);
+                pdf.setTextColor(100, 116, 139);
+                pdf.text(contradiction.document1.name, margin + 25, yPosition);
+                
+                yPosition += 5;
+                
+                pdf.setFontSize(9);
+                pdf.setTextColor(0, 0, 0);
+                const doc1Text = wrapText(`"${contradiction.document1.text}"`, contentWidth - 10, 9);
+                pdf.text(doc1Text, margin + 5, yPosition);
+                yPosition += doc1Text.length * 4 + 5;
+                
+                checkPageBreak(20);
+                
+                pdf.setFont('helvetica', 'bold');
+                pdf.text('Document 2:', margin + 5, yPosition);
+                
+                pdf.setFont('helvetica', 'normal');
+                pdf.setFontSize(9);
+                pdf.setTextColor(100, 116, 139);
+                pdf.text(contradiction.document2.name, margin + 25, yPosition);
+                
+                yPosition += 5;
+                
+                pdf.setFontSize(9);
+                pdf.setTextColor(0, 0, 0);
+                const doc2Text = wrapText(`"${contradiction.document2.text}"`, contentWidth - 10, 9);
+                pdf.text(doc2Text, margin + 5, yPosition);
+                yPosition += doc2Text.length * 4 + 5;
+                
+                // Explanation
+                checkPageBreak(15);
+                pdf.setFillColor(255, 251, 235);
+                pdf.setDrawColor(245, 158, 11);
+                
+                const explanationText = wrapText(contradiction.explanation, contentWidth - 10, 9);
+                const explanationHeight = explanationText.length * 4 + 6;
+                
+                pdf.rect(margin, yPosition, contentWidth, explanationHeight, 'FD');
+                
+                pdf.setFontSize(9);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setTextColor(146, 64, 14);
+                pdf.text('Analysis:', margin + 3, yPosition + 4);
+                
+                pdf.setFont('helvetica', 'normal');
+                pdf.text(explanationText, margin + 3, yPosition + 8);
+                
+                yPosition += explanationHeight + 15;
             });
         }
-
-        // Recommendations and footer same as your existing code...
-
-        // Save PDF
+        
+        // Recommendations
+        checkPageBreak(40);
+        pdf.setFontSize(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setTextColor(37, 99, 235);
+        pdf.text('Recommendations', margin, yPosition);
+        
+        yPosition += 15;
+        
+        const recommendations = [
+            'Review and align deadline specifications across all documents',
+            'Establish consistent attendance policies',
+            'Standardize penalty rates for late submissions',
+            'Create a master policy document to prevent future contradictions',
+            'Implement regular document review cycles',
+            'Consider using document version control systems'
+        ];
+        
+        recommendations.forEach((recommendation, index) => {
+            checkPageBreak(10);
+            pdf.setFontSize(10);
+            pdf.setFont('helvetica', 'normal');
+            pdf.setTextColor(0, 0, 0);
+            
+            const recText = wrapText(`${index + 1}. ${recommendation}`, contentWidth - 10, 10);
+            pdf.text(recText, margin + 5, yPosition);
+            yPosition += recText.length * 4 + 3;
+        });
+        
+        // Footer on last page
+        yPosition = pageHeight - 30;
+        pdf.setFillColor(248, 250, 252);
+        pdf.rect(0, yPosition, pageWidth, 30, 'F');
+        
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 116, 139);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text('Generated by Smart Doc Checker AI v2.1', margin, yPosition + 10);
+        pdf.text(`Report ID: SDC-${Date.now()}`, margin, yPosition + 15);
+        pdf.text('For questions or support, contact: support@smartdocchecker.com', margin, yPosition + 20);
+        
+        // Save the PDF
         const fileName = `smart-doc-analysis-${Date.now()}.pdf`;
         pdf.save(fileName);
-
+        
         this.showNotification('PDF report downloaded successfully', 'success');
     }
-
     
     getTypeColor(type) {
         const colors = {
@@ -778,14 +829,6 @@ class SmartDocChecker {
             case 'warning': return '#f59e0b';
             default: return '#2563eb';
         }
-    }
-    
-    calculateTimeSaved(docCount) {
-        // Assume each document saves 2 minutes of manual review
-        const minutesSaved = docCount * 2;
-        // Convert to hours, rounded to one decimal
-        const hoursSaved = (minutesSaved / 60).toFixed(1);
-        return hoursSaved;
     }
 }
 

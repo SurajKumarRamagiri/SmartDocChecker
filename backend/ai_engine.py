@@ -26,16 +26,3 @@ def semantic_similarity(text1, text2):
 def extract_entities(text):
     doc = nlp(text)
     return [(ent.text, ent.label_) for ent in doc.ents]
-
-def get_entity_embedding(entity_text):
-    return sbert_model.encode(entity_text, convert_to_tensor=True)
-
-def extract_sentences(text: str) -> list[str]:
-    doc = nlp(text)
-    return [sent.text.strip() for sent in doc.sents]
-
-def get_sentence_containing(entity_text, sentences):
-    for sent in sentences:
-        if entity_text in sent:
-            return sent
-    return ""
