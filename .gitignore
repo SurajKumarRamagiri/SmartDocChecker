@@ -33,7 +33,12 @@ backend/*.sqlite3
 backend/*.db
 backend/.pytest_cache/
 backend/.mypy_cache/
+<<<<<<< HEAD
 backend/.model_cache/
 
 venv/
 SmartDocChecker.zip
+=======
+
+venv/
+>>>>>>> a6447df467471ed5ec71d8d273cc06566e585c67

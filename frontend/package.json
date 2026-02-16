@@ -10,7 +10,12 @@
   },
   "dependencies": {
     "html2canvas": "^1.4.1",
+<<<<<<< HEAD
     "jspdf": "^4.1.0",
+=======
+    "jspdf": "^4.0.0",
+    "lucide-react": "^0.344.0",
+>>>>>>> a6447df467471ed5ec71d8d273cc06566e585c67
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.13.0"
