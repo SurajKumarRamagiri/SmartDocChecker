@@ -1,4 +1,4 @@
-const API_BASE = '';
+const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 /**
  * Centralized fetch wrapper with auth, error handling, and auto-logout on 401.
