@@ -12,15 +12,19 @@ async function fetchWithAuth(url, options = {}, token = null) {
     const response = await fetch(`${API_BASE}${url}`, { ...options, headers });
 
     if (response.status === 401) {
-        // Token expired or invalid — clear storage and redirect
+        // Token expired or invalid — notify AuthContext via custom event
         localStorage.removeItem('token');
-        window.location.href = '/login';
+        window.dispatchEvent(new CustomEvent('auth:logout'));
         throw new Error('Session expired. Please log in again.');
     }
 
     if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || `Request failed (${response.status})`);
+        // Hide raw server error details from users
+        const safeDetail = response.status >= 500
+            ? 'An unexpected server error occurred. Please try again later.'
+            : (err.detail || `Request failed (${response.status})`);
+        throw new Error(safeDetail);
     }
 
     // Handle empty / non-JSON responses (e.g. 204 No Content)
@@ -30,22 +34,6 @@ async function fetchWithAuth(url, options = {}, token = null) {
     }
 
     return response.json();
-}
-
-/**
- * Send files to the backend for contradiction analysis.
- * @deprecated Use analyzeMultiDocuments() instead
- */
-export async function analyzeDocuments(files) {
-    const formData = new FormData();
-    files.forEach((file) => {
-        formData.append('files', file, file.name);
-    });
-
-    return fetchWithAuth('/api/analyze', {
-        method: 'POST',
-        body: formData,
-    });
 }
 
 /**

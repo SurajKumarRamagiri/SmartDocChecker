@@ -36,11 +36,12 @@ function DashboardLayout() {
                 </ErrorBoundary>
             </main>
 
-            {notifications.map((n) => (
+            {notifications.map((n, index) => (
                 <Notification
                     key={n.id}
                     message={n.message}
                     type={n.type}
+                    index={index}
                     onClose={() => removeNotification(n.id)}
                 />
             ))}

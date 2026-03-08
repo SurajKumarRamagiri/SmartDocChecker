@@ -28,7 +28,9 @@ dist-ssr
 
 # Backend ignores
 __pycache__/
+**/__pycache__/
 *.pyc
+*.pyo
 backend/.env
 backend/logs/
 backend/*.sqlite3
@@ -36,6 +38,13 @@ backend/*.db
 backend/.pytest_cache/
 backend/.mypy_cache/
 backend/.model_cache/
+backend/venv/
+backend/.dockerignore
+backend/.gitattributes
+backend/.gitignore
+backend/Dockerfile
+backend/README.md
 
 venv/
 SmartDocChecker.zip
+package-lock.json

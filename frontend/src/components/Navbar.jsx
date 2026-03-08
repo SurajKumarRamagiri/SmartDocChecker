@@ -56,7 +56,7 @@ export default function Navbar() {
                     {user && (
                         <>
                             <span className="role-badge">{user.name}</span>
-                            <button className="logout-btn" onClick={handleLogout} title="Log out">
+                            <button className="logout-btn" onClick={handleLogout} title="Log out" aria-label="Log out">
                                 <i className="fas fa-sign-out-alt"></i>
                             </button>
                         </>

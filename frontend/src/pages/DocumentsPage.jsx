@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { fetchDocuments, uploadDocument, downloadDocument, deleteDocument } from '../utils/api';
 import './DocumentsPage.css';
@@ -40,10 +40,22 @@ export default function DocumentsPage({ onNotification }) {
     const handleUpload = useCallback(async (files) => {
         if (!files || files.length === 0) return;
 
+        // Validate file types before uploading
+        const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.txt'];
+        const validFiles = Array.from(files).filter((f) => {
+            const ext = f.name.split('.').pop()?.toLowerCase();
+            if (!ext || !ALLOWED_EXTENSIONS.includes('.' + ext)) {
+                onNotification?.(`Unsupported file type: ${f.name}`, 'error');
+                return false;
+            }
+            return true;
+        });
+        if (validFiles.length === 0) return;
+
         setUploading(true);
         let successCount = 0;
 
-        for (const file of files) {
+        for (const file of validFiles) {
             try {
                 const doc = await uploadDocument(file, token);
                 setDocuments((prev) => [doc, ...prev]);
@@ -63,7 +75,13 @@ export default function DocumentsPage({ onNotification }) {
     const handleDownload = useCallback(async (doc) => {
         try {
             const result = await downloadDocument(doc.id, token);
-            window.open(result.download_url, '_blank');
+            const url = result.download_url;
+            // Validate URL scheme to prevent open redirect
+            if (url && /^https?:\/\//i.test(url)) {
+                window.open(url, '_blank', 'noopener,noreferrer');
+            } else {
+                onNotification?.('Invalid download URL', 'error');
+            }
         } catch (err) {
             onNotification?.('Failed to generate download link', 'error');
         }
@@ -90,15 +108,15 @@ export default function DocumentsPage({ onNotification }) {
         handleUpload(Array.from(e.dataTransfer.files));
     };
 
-    // ── Filter & Sort ──
-    const filteredDocs = documents
+    // ── Filter & Sort (memoized) ──
+    const filteredDocs = useMemo(() => documents
         .filter((d) => d.name.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => {
             if (sortBy === 'newest') return new Date(b.upload_date) - new Date(a.upload_date);
             if (sortBy === 'oldest') return new Date(a.upload_date) - new Date(b.upload_date);
             if (sortBy === 'name') return a.name.localeCompare(b.name);
             return 0;
-        });
+        }), [documents, searchQuery, sortBy]);
 
     // ── File icon based on extension ──
     const getFileIcon = (name) => {
@@ -205,6 +223,7 @@ export default function DocumentsPage({ onNotification }) {
                             className={viewMode === 'grid' ? 'active' : ''}
                             onClick={() => setViewMode('grid')}
                             title="Grid view"
+                            aria-label="Grid view"
                         >
                             <i className="fas fa-th-large"></i>
                         </button>
@@ -212,6 +231,7 @@ export default function DocumentsPage({ onNotification }) {
                             className={viewMode === 'list' ? 'active' : ''}
                             onClick={() => setViewMode('list')}
                             title="List view"
+                            aria-label="List view"
                         >
                             <i className="fas fa-list"></i>
                         </button>
@@ -275,6 +295,7 @@ export default function DocumentsPage({ onNotification }) {
                                         className="doc-action doc-action--download"
                                         onClick={() => handleDownload(doc)}
                                         title="Download"
+                                        aria-label={`Download ${doc.name}`}
                                     >
                                         <i className="fas fa-download"></i>
                                     </button>
@@ -282,6 +303,7 @@ export default function DocumentsPage({ onNotification }) {
                                         className="doc-action doc-action--delete"
                                         onClick={() => handleDelete(doc.id)}
                                         title="Delete"
+                                        aria-label={`Delete ${doc.name}`}
                                     >
                                         <i className="fas fa-trash-alt"></i>
                                     </button>
@@ -311,6 +333,7 @@ export default function DocumentsPage({ onNotification }) {
                                         className="doc-action doc-action--download"
                                         onClick={() => handleDownload(doc)}
                                         title="Download"
+                                        aria-label={`Download ${doc.name}`}
                                     >
                                         <i className="fas fa-download"></i>
                                     </button>
@@ -318,6 +341,7 @@ export default function DocumentsPage({ onNotification }) {
                                         className="doc-action doc-action--delete"
                                         onClick={() => handleDelete(doc.id)}
                                         title="Delete"
+                                        aria-label={`Delete ${doc.name}`}
                                     >
                                         <i className="fas fa-trash-alt"></i>
                                     </button>

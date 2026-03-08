@@ -4,22 +4,9 @@ JWT token creation and verification.
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from jose import JWTError, jwt
+
 from config import settings
-
-try:
-    from jose import JWTError, jwt
-except ImportError:
-    from jwt import PyJWTError as JWTError  # type: ignore
-    import jwt as _jwt  # type: ignore
-
-    class jwt:  # type: ignore
-        @staticmethod
-        def encode(claims, key, algorithm):
-            return _jwt.encode(claims, key, algorithm=algorithm)
-
-        @staticmethod
-        def decode(token, key, algorithms):
-            return _jwt.decode(token, key, algorithms=algorithms)
 
 
 def create_access_token(

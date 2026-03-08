@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 
 /**
  * UploadArea – drag-and-drop zone for uploading files.
@@ -8,19 +8,20 @@ import React, { useRef } from 'react';
  */
 export default function UploadArea({ onFilesSelected }) {
     const fileInputRef = useRef(null);
+    const [isDragOver, setIsDragOver] = useState(false);
 
     const handleDragOver = (e) => {
         e.preventDefault();
-        e.currentTarget.classList.add('dragover');
+        setIsDragOver(true);
     };
 
-    const handleDragLeave = (e) => {
-        e.currentTarget.classList.remove('dragover');
+    const handleDragLeave = () => {
+        setIsDragOver(false);
     };
 
     const handleDrop = (e) => {
         e.preventDefault();
-        e.currentTarget.classList.remove('dragover');
+        setIsDragOver(false);
         onFilesSelected(e.dataTransfer.files);
     };
 
@@ -36,8 +37,17 @@ export default function UploadArea({ onFilesSelected }) {
 
     return (
         <div
-            className="upload-area"
+            className={`upload-area${isDragOver ? ' dragover' : ''}`}
+            role="button"
+            tabIndex={0}
+            aria-label="Upload documents. Drop files here or press Enter to browse."
             onClick={handleClick}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleClick();
+                }
+            }}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
@@ -52,7 +62,7 @@ export default function UploadArea({ onFilesSelected }) {
                 type="file"
                 ref={fileInputRef}
                 multiple
-                accept=".pdf,.docx,.txt"
+                accept=".pdf,.doc,.docx,.txt"
                 hidden
                 onChange={handleChange}
             />

@@ -20,6 +20,7 @@ except ImportError:
     DocxDocument = None
 
 import re as _re
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,6 @@ def _clean_pdf_text(raw_text: str, num_pages: int) -> str:
     # Replace isolated numbers (possibly page numbers embedded in running
     # headers) with a placeholder so "Title | 3 Foo" and "Title | 5 Foo"
     # are treated as the same line.
-    from collections import Counter
 
     def _normalise_line(line: str) -> str:
         """Collapse page-number-like tokens so header variants match."""
@@ -171,7 +171,6 @@ def extract_text_from_docx(file_content: Union[bytes, io.BytesIO]) -> str:
                     if txt:
                         total_cells += 1
                         # Count cells that are purely numeric/currency/date
-                        import re as _re
                         if _re.match(r'^[\d\s\.\,\$\%\€\£\(\)\-\+\/\|:]+$', txt):
                             numeric_cells += 1
             # Skip table if >50% of cells are numeric data
@@ -262,10 +261,13 @@ def extract_text(file_content: Union[bytes, io.BytesIO], filename: str) -> str:
     
     if ext == '.pdf':
         return extract_text_from_pdf(file_content)
-    elif ext in ['.docx', '.doc']:
-        # Note: .doc (old Word format) is not fully supported by python-docx
-        # but we'll try anyway
+    elif ext == '.docx':
         return extract_text_from_docx(file_content)
+    elif ext == '.doc':
+        raise TextExtractionError(
+            "Legacy .doc format is not supported. "
+            "Please convert to .docx or PDF and re-upload."
+        )
     elif ext == '.txt':
         return extract_text_from_txt(file_content)
     else:
@@ -292,8 +294,7 @@ def clean_text(raw_text: str) -> str:
     cleaned = '\n'.join(lines)
     
     # Normalize multiple spaces to single space
-    import re
-    cleaned = re.sub(r' +', ' ', cleaned)
+    cleaned = _re.sub(r' +', ' ', cleaned)
     
     return cleaned
 

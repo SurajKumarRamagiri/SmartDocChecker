@@ -16,6 +16,17 @@ export function AuthProvider({ children }) {
     const [token, setToken] = useState(() => localStorage.getItem('token'));
     const [loading, setLoading] = useState(true);
 
+    // Listen for forced logout from API layer (e.g. 401 responses)
+    useEffect(() => {
+        const handleForceLogout = () => {
+            localStorage.removeItem('token');
+            setToken(null);
+            setUser(null);
+        };
+        window.addEventListener('auth:logout', handleForceLogout);
+        return () => window.removeEventListener('auth:logout', handleForceLogout);
+    }, []);
+
     // Validate token on mount
     useEffect(() => {
         if (!token) {

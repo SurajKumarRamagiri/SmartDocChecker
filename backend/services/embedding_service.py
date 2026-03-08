@@ -1,5 +1,6 @@
 """Enhanced embedding service with batch generation and similarity search."""
 import logging
+import threading
 import numpy as np
 from typing import List, Tuple
 from sqlalchemy.orm import Session
@@ -11,33 +12,36 @@ import os
 from config import settings
 
 _sbert_model = None
+_sbert_lock = threading.Lock()
 
 def _load_sbert_model():
     global _sbert_model
     if _sbert_model is None:
-        from sentence_transformers import SentenceTransformer
-        model_name = "all-MiniLM-L6-v2"
-        
-        # Ensure cache dir exists
-        os.makedirs(settings.MODEL_CACHE_DIR, exist_ok=True)
-        
-        try:
-            # Attempt local load first
-            _sbert_model = SentenceTransformer(
-                model_name, 
-                cache_folder=settings.MODEL_CACHE_DIR, 
-                local_files_only=True
-            )
-            logger.info(f"Loaded SBERT model from local cache: {model_name}")
-        except Exception:
-            # Fallback to download
-            logger.info(f"Model {model_name} not found locally. Downloading to {settings.MODEL_CACHE_DIR}...")
-            _sbert_model = SentenceTransformer(
-                model_name, 
-                cache_folder=settings.MODEL_CACHE_DIR,
-                token=settings.HF_TOKEN if settings.HF_TOKEN else None
-            )
-            logger.info(f"Downloaded and loaded SBERT model: {model_name}")
+        with _sbert_lock:
+            if _sbert_model is None:  # double-checked locking
+                from sentence_transformers import SentenceTransformer
+                model_name = "all-MiniLM-L6-v2"
+
+                # Ensure cache dir exists
+                os.makedirs(settings.MODEL_CACHE_DIR, exist_ok=True)
+
+                try:
+                    # Attempt local load first
+                    _sbert_model = SentenceTransformer(
+                        model_name,
+                        cache_folder=settings.MODEL_CACHE_DIR,
+                        local_files_only=True
+                    )
+                    logger.info(f"Loaded SBERT model from local cache: {model_name}")
+                except Exception:
+                    # Fallback to download
+                    logger.info(f"Model {model_name} not found locally. Downloading to {settings.MODEL_CACHE_DIR}...")
+                    _sbert_model = SentenceTransformer(
+                        model_name,
+                        cache_folder=settings.MODEL_CACHE_DIR,
+                        token=settings.HF_TOKEN if settings.HF_TOKEN else None
+                    )
+                    logger.info(f"Downloaded and loaded SBERT model: {model_name}")
 
 
 def semantic_similarity(text1: str, text2: str) -> float:
@@ -99,7 +103,10 @@ def find_similar_clauses(
     results = []
     for clause in clauses:
         clause_vec = np.array(clause.embedding)
-        similarity = np.dot(query_vec, clause_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(clause_vec))
+        denom = np.linalg.norm(query_vec) * np.linalg.norm(clause_vec)
+        if denom == 0:
+            continue
+        similarity = np.dot(query_vec, clause_vec) / denom
         
         if similarity >= threshold:
             results.append((clause, float(similarity)))

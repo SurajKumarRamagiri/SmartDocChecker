@@ -4,24 +4,15 @@ import logging
 from typing import List, Dict
 
 from services.ner_service import check_entity_contradictions
+from constants import STOP_WORDS
 
 logger = logging.getLogger(__name__)
-
-# Stop words stripped before computing content-word overlap
-_STOP = frozenset({
-    'the','a','an','is','are','was','were','be','been','being',
-    'have','has','had','do','does','did','will','would','shall',
-    'should','may','might','can','could','of','in','to','for',
-    'and','or','but','on','at','by','with','from','as','into',
-    'that','this','it','its','not','no','if','so','than','then',
-    'such','also','any','all','each','every','both','other',
-})
 
 
 def _content_overlap(text_a: str, text_b: str) -> float:
     """Return overlap ratio using content words only (stop words removed)."""
-    wa = {w for w in text_a.lower().split() if w not in _STOP and len(w) > 2}
-    wb = {w for w in text_b.lower().split() if w not in _STOP and len(w) > 2}
+    wa = {w for w in text_a.lower().split() if w not in STOP_WORDS and len(w) > 2}
+    wb = {w for w in text_b.lower().split() if w not in STOP_WORDS and len(w) > 2}
     if not wa or not wb:
         return 0.0
     return len(wa & wb) / max(len(wa), len(wb))

@@ -52,10 +52,11 @@ settings = Settings()
 # ── Security: reject the default placeholder secret in production ──
 _DEFAULT_SECRET = "smartdocchecker-secret-key-change-in-production"
 if settings.SECRET_KEY == _DEFAULT_SECRET and not settings.DEBUG:
-    import warnings
-    warnings.warn(
-        "\n⚠  SECRET_KEY is set to the insecure default!\n"
+    import sys
+    print(
+        "\n❌ FATAL: SECRET_KEY is set to the insecure default!\n"
         "   Set a strong, random SECRET_KEY in your .env file.\n"
         "   Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"\n",
-        stacklevel=1,
+        file=sys.stderr,
     )
+    raise SystemExit(1)

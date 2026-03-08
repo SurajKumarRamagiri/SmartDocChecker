@@ -100,8 +100,8 @@ export default function LandingPage() {
                         Built for compliance teams, legal reviewers, and policy managers.
                     </p>
                     <div className="hero__cta">
-                        <Link to="/app">
-                            <Button variant="primary" size="lg" icon="fas fa-play">Try Demo</Button>
+                        <Link to="/login">
+                            <Button variant="primary" size="lg" icon="fas fa-rocket">Get Started</Button>
                         </Link>
                         <Link to="/login">
                             <Button variant="secondary" size="lg" icon="fas fa-sign-in-alt">Sign In</Button>
@@ -215,8 +215,8 @@ export default function LandingPage() {
                             </div>
                         </div>
                     </div>
-                    <Link to="/app">
-                        <Button variant="primary" size="lg" icon="fas fa-upload">Upload Sample Document</Button>
+                    <Link to="/login">
+                        <Button variant="primary" size="lg" icon="fas fa-rocket">Get Started Free</Button>
                     </Link>
                 </div>
             </section>

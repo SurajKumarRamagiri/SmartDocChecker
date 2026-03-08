@@ -1,12 +1,13 @@
 """NLI service using lightweight cross-encoder model."""
 import logging
+import threading
 import numpy as np
 from typing import List, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
 _nli_model = None
-
+_nli_lock = threading.Lock()
 
 import os
 from config import settings
@@ -14,29 +15,31 @@ from config import settings
 def _load_nli_model():
     global _nli_model
     if _nli_model is None:
-        from sentence_transformers import CrossEncoder
-        model_name = 'cross-encoder/nli-distilroberta-base'
-        
-        # Ensure cache dir exists
-        os.makedirs(settings.MODEL_CACHE_DIR, exist_ok=True)
-        
-        try:
-            # Attempt local load first
-            _nli_model = CrossEncoder(
-                model_name, 
-                cache_folder=settings.MODEL_CACHE_DIR, 
-                local_files_only=True
-            )
-            logger.info(f"Loaded NLI model from local cache: {model_name}")
-        except Exception:
-            # Fallback to download
-            logger.info(f"Model {model_name} not found locally. Downloading to {settings.MODEL_CACHE_DIR}...")
-            _nli_model = CrossEncoder(
-                model_name, 
-                cache_folder=settings.MODEL_CACHE_DIR,
-                token=settings.HF_TOKEN if settings.HF_TOKEN else None
-            )
-            logger.info(f"Downloaded and loaded NLI model: {model_name}")
+        with _nli_lock:
+            if _nli_model is None:  # double-checked locking
+                from sentence_transformers import CrossEncoder
+                model_name = 'cross-encoder/nli-distilroberta-base'
+
+                # Ensure cache dir exists
+                os.makedirs(settings.MODEL_CACHE_DIR, exist_ok=True)
+
+                try:
+                    # Attempt local load first
+                    _nli_model = CrossEncoder(
+                        model_name,
+                        cache_folder=settings.MODEL_CACHE_DIR,
+                        local_files_only=True
+                    )
+                    logger.info(f"Loaded NLI model from local cache: {model_name}")
+                except Exception:
+                    # Fallback to download
+                    logger.info(f"Model {model_name} not found locally. Downloading to {settings.MODEL_CACHE_DIR}...")
+                    _nli_model = CrossEncoder(
+                        model_name,
+                        cache_folder=settings.MODEL_CACHE_DIR,
+                        token=settings.HF_TOKEN if settings.HF_TOKEN else None
+                    )
+                    logger.info(f"Downloaded and loaded NLI model: {model_name}")
 
 
 def detect_contradiction(text1: str, text2: str) -> float:

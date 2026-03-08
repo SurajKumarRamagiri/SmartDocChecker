@@ -7,12 +7,10 @@ import logging
 import os
 from datetime import datetime, timezone
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, Request
-from sqlalchemy.orm import Session
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from sqlalchemy.orm import Session, selectinload
 
 from schemas.document_schema import DocumentOut, DocumentUploadResponse
-from dependencies import get_current_user, get_db
+from dependencies import get_current_user, get_db, limiter
 from models.user import User
 from models.document import Document
 from services import supabase_storage
@@ -20,7 +18,6 @@ from constants import SUPPORTED_FILE_TYPES, MAX_FILE_SIZE_MB
 from config import settings
 
 logger = logging.getLogger(__name__)
-limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
@@ -41,11 +38,17 @@ async def upload_document(
             detail=f"Unsupported file type '{file_ext}'. Allowed: {', '.join(SUPPORTED_FILE_TYPES)}",
         )
 
-    user = db.query(User).filter(User.email == current_user["email"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_id = current_user["user_id"]
 
     doc_id = str(uuid.uuid4())
+
+    # ── Pre-check file size via UploadFile.size (avoids reading huge files) ──
+    max_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
+    if file.size and file.size > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum allowed: {MAX_FILE_SIZE_MB} MB",
+        )
 
     # ── Upload file to Supabase Storage ──
     file_bytes = await file.read()
@@ -63,7 +66,7 @@ async def upload_document(
     if not safe_name or safe_name.startswith('.'):
         safe_name = f"upload_{doc_id}{file_ext}"
 
-    storage_path = f"user_{user.id}/{doc_id}/{safe_name}"
+    storage_path = f"user_{user_id}/{doc_id}/{safe_name}"
     content_type = file.content_type or "application/octet-stream"
 
     try:
@@ -79,13 +82,13 @@ async def upload_document(
         file_path=storage_path,
         status="pending",
         upload_date=datetime.now(timezone.utc),
-        user_id=user.id,
+        user_id=user_id,
     )
     db.add(doc)
     db.commit()
     db.refresh(doc)
 
-    logger.info(f"Document uploaded: {doc.name} → {storage_path}")
+    logger.info(f"Document uploaded: {doc.name} (id={doc.id})")
 
     return DocumentUploadResponse(
         id=doc.id,
@@ -103,13 +106,12 @@ async def list_documents(
     skip: int = Query(0, ge=0, description="Number of documents to skip"),
     limit: int = Query(50, ge=1, le=200, description="Max documents to return"),
 ):
-    user = db.query(User).filter(User.email == current_user["email"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_id = current_user["user_id"]
 
     docs = (
         db.query(Document)
-        .filter(Document.user_id == user.id)
+        .filter(Document.user_id == user_id)
+        .options(selectinload(Document.contradictions))
         .order_by(Document.upload_date.desc())
         .offset(skip)
         .limit(limit)
@@ -135,13 +137,11 @@ async def get_document(
     db: Session = Depends(get_db),
 ):
     """Get metadata for a single document."""
-    user = db.query(User).filter(User.email == current_user["email"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_id = current_user["user_id"]
 
     doc = db.query(Document).filter(
-        Document.id == doc_id, Document.user_id == user.id
-    ).first()
+        Document.id == doc_id, Document.user_id == user_id
+    ).options(selectinload(Document.contradictions)).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -163,12 +163,10 @@ async def download_document(
     db: Session = Depends(get_db),
 ):
     """Get a signed download URL for a document."""
-    user = db.query(User).filter(User.email == current_user["email"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_id = current_user["user_id"]
 
     doc = db.query(Document).filter(
-        Document.id == doc_id, Document.user_id == user.id
+        Document.id == doc_id, Document.user_id == user_id
     ).first()
     if not doc or not doc.file_path:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -193,12 +191,10 @@ async def delete_document(
     from models.contradiction import Contradiction
     from models.clause import Clause
 
-    user = db.query(User).filter(User.email == current_user["email"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_id = current_user["user_id"]
 
     doc = db.query(Document).filter(
-        Document.id == doc_id, Document.user_id == user.id
+        Document.id == doc_id, Document.user_id == user_id
     ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -256,5 +252,5 @@ async def delete_document(
         except Exception as e:
             logger.warning(f"Could not delete from storage: {e}")
 
-    logger.info(f"Document deleted: {doc_name} by {current_user['email']}")
+    logger.info(f"Document deleted: id={doc_id} by user_id={current_user['user_id']}")
     return {"detail": "Document deleted"}

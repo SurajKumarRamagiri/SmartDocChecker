@@ -9,14 +9,11 @@ from pydantic import BaseModel
 from typing import List
 from sqlalchemy.orm import Session
 
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
 from schemas.result_schema import ContradictionOut
-from dependencies import get_current_user, get_db
+from dependencies import get_current_user, get_db, limiter
 from config import settings
-from workers.processing_worker import process_document
 from workers.comparison_worker import process_multi_documents
+from workers.processing_worker import process_document
 from models.document import Document
 from models.clause import Clause
 from models.contradiction import Contradiction
@@ -25,7 +22,6 @@ from models.cross_contradiction import CrossContradiction
 from models.user import User
 
 logger = logging.getLogger(__name__)
-limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/api", tags=["Analysis"])
 
@@ -37,10 +33,8 @@ class MultiAnalyzeRequest(BaseModel):
 
 def _verify_document_ownership(document_id: str, current_user: dict, db: Session):
     """Ensure the document belongs to the current user."""
-    user = db.query(User).filter(User.email == current_user["email"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    doc = db.query(Document).filter(Document.id == document_id, Document.user_id == user.id).first()
+    user_id = current_user["user_id"]
+    doc = db.query(Document).filter(Document.id == document_id, Document.user_id == user_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found or access denied")
 
@@ -129,8 +123,11 @@ async def search_clauses(
         query = query.filter(Clause.section == section)
     
     if q:
-        # Full-text search
-        query = query.filter(Clause.search_vector.match(q))
+        # Full-text search — PostgreSQL only; fall back to LIKE on SQLite
+        if settings.DATABASE_URL.startswith("sqlite"):
+            query = query.filter(Clause.text.ilike(f"%{q}%"))
+        else:
+            query = query.filter(Clause.search_vector.match(q))
     
     clauses = query.all()
     return {"clauses": [{"id": c.id, "text": c.text, "section": c.section, "position": c.position} for c in clauses]}
@@ -158,12 +155,10 @@ async def analyze_multi(
         raise HTTPException(status_code=400, detail="Maximum 10 documents per comparison")
 
     # Verify all documents exist and belong to the user
-    user = db.query(User).filter(User.email == current_user["email"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_id = current_user["user_id"]
 
     for doc_id in doc_ids:
-        doc = db.query(Document).filter(Document.id == doc_id, Document.user_id == user.id).first()
+        doc = db.query(Document).filter(Document.id == doc_id, Document.user_id == user_id).first()
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found or not yours")
 
@@ -171,7 +166,7 @@ async def analyze_multi(
     comparison_id = str(uuid.uuid4())
     session = ComparisonSession(
         id=comparison_id,
-        user_id=user.id,
+        user_id=user_id,
         status="pending",
         document_ids=json.dumps(doc_ids),
     )
@@ -191,10 +186,10 @@ async def get_comparison_status(
     current_user: dict = Depends(get_current_user),
 ):
     """Poll comparison status."""
-    user = db.query(User).filter(User.email == current_user["email"]).first()
+    user_id = current_user["user_id"]
     session = db.query(ComparisonSession).filter(
         ComparisonSession.id == comparison_id,
-        ComparisonSession.user_id == user.id,
+        ComparisonSession.user_id == user_id,
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Comparison not found")
@@ -215,10 +210,10 @@ async def get_comparison_results(
     current_user: dict = Depends(get_current_user),
 ):
     """Fetch full comparison results."""
-    user = db.query(User).filter(User.email == current_user["email"]).first()
+    user_id = current_user["user_id"]
     session = db.query(ComparisonSession).filter(
         ComparisonSession.id == comparison_id,
-        ComparisonSession.user_id == user.id,
+        ComparisonSession.user_id == user_id,
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Comparison not found")

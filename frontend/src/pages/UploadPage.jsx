@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { fetchDocuments, uploadDocument, analyzeSingleDocument, analyzeMultiDocuments, getDocumentStatus, getAnalysisResults, getComparisonStatus, getComparisonResults } from '../utils/api';
 import UploadArea from '../components/UploadArea';
@@ -62,6 +62,24 @@ export default function UploadPage({ onNotification }) {
     const [loadingDocs, setLoadingDocs] = useState(false);
     const [showReRunModal, setShowReRunModal] = useState(false);
     const [pendingDocId, setPendingDocId] = useState(null);
+    const rafRef = useRef(null);
+
+    // Cleanup requestAnimationFrame on unmount
+    useEffect(() => {
+        return () => {
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        };
+    }, []);
+
+    // Close re-run modal on Escape key
+    useEffect(() => {
+        if (!showReRunModal) return;
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') setShowReRunModal(false);
+        };
+        document.addEventListener('keydown', handleEscape);
+        return () => document.removeEventListener('keydown', handleEscape);
+    }, [showReRunModal]);
 
     // ── Load existing documents when in select mode ──
     useEffect(() => {
@@ -91,15 +109,15 @@ export default function UploadPage({ onNotification }) {
                 setUploadedFiles((prev) => {
                     const maxFiles = analysisType === 'single' ? 1 : 10;
                     if (prev.length >= maxFiles) {
-                        onNotification(`Maximum ${maxFiles} document${maxFiles > 1 ? 's' : ''} allowed`, 'warning');
+                        onNotification?.(`Maximum ${maxFiles} document${maxFiles > 1 ? 's' : ''} allowed`, 'warning');
                         return prev;
                     }
                     if (!isValidFile(file)) {
-                        onNotification(`Invalid file type: ${file.name}`, 'error');
+                        onNotification?.(`Invalid file type: ${file.name}`, 'error');
                         return prev;
                     }
                     if (file.size > 10 * 1024 * 1024) {
-                        onNotification(`File too large: ${file.name}`, 'error');
+                        onNotification?.(`File too large: ${file.name}`, 'error');
                         return prev;
                     }
                     return [
@@ -129,7 +147,7 @@ export default function UploadPage({ onNotification }) {
                 return prev.filter((id) => id !== docId);
             } else {
                 if (prev.length >= maxDocs) {
-                    onNotification(`Maximum ${maxDocs} document${maxDocs > 1 ? 's' : ''} allowed`, 'warning');
+                    onNotification?.(`Maximum ${maxDocs} document${maxDocs > 1 ? 's' : ''} allowed`, 'warning');
                     return prev;
                 }
                 return [...prev, docId];
@@ -161,7 +179,7 @@ export default function UploadPage({ onNotification }) {
         const currentCount = mode === 'upload' ? uploadedFiles.length : selectedDocIds.length;
 
         if (currentCount < minDocs) {
-            onNotification(`Please ${mode === 'upload' ? 'upload' : 'select'} at least ${minDocs} document${minDocs > 1 ? 's' : ''}`, 'warning');
+            onNotification?.(`Please ${mode === 'upload' ? 'upload' : 'select'} at least ${minDocs} document${minDocs > 1 ? 's' : ''}`, 'warning');
             return;
         }
 
@@ -380,18 +398,11 @@ export default function UploadPage({ onNotification }) {
 
             setShowProgress(false);
             setShowResults(true);
-            onNotification('Analysis completed successfully!', 'success');
+            onNotification?.('Analysis completed successfully!', 'success');
 
         } catch (err) {
-            onNotification('Failed to analyze: ' + err.message, 'error');
-            setAnalysisResults({
-                contradictions: {},
-                totalContradictions: 0,
-                timestamp: new Date().toISOString(),
-                isMultiDoc: analysisType === 'multi',
-            });
-            setShowProgress(false);
-            setShowResults(true);
+            onNotification?.('Failed to analyze: ' + err.message, 'error');
+            resetAnalysis();
         } finally {
             setIsAnalyzing(false);
         }
@@ -409,14 +420,14 @@ export default function UploadPage({ onNotification }) {
         setCurrentStepIndex(0);
         setPendingDocId(null);
         setShowReRunModal(false);
-        onNotification('Analysis reset. Ready for new documents.', 'success');
+        onNotification?.('Analysis reset. Ready for new documents.', 'success');
     };
 
     // ── PDF download ──
     const downloadReport = () => {
         if (!analysisResults) return;
         generatePDFReport({ uploadedFiles, analysisResults });
-        onNotification('PDF report downloaded successfully', 'success');
+        onNotification?.('PDF report downloaded successfully', 'success');
     };
 
     // ── Handle analysis type change ──
@@ -497,7 +508,16 @@ export default function UploadPage({ onNotification }) {
                                         <div
                                             key={doc.id}
                                             className={`doc-item ${selectedDocIds.includes(doc.id) ? 'selected' : ''}`}
+                                            role="checkbox"
+                                            aria-checked={selectedDocIds.includes(doc.id)}
+                                            tabIndex={0}
                                             onClick={() => toggleDocSelection(doc.id)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    toggleDocSelection(doc.id);
+                                                }
+                                            }}
                                         >
                                             <div className="doc-checkbox">
                                                 {selectedDocIds.includes(doc.id) && <i className="fas fa-check"></i>}

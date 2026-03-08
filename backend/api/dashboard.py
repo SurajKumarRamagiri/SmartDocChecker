@@ -26,27 +26,25 @@ async def get_dashboard_stats(
     db: Session = Depends(get_db),
 ):
     """Return real-time analytics for the current user's dashboard."""
-    user = db.query(User).filter(User.email == current_user["email"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_id = current_user["user_id"]
 
     # ── User's documents ──
-    user_doc_ids = db.query(Document.id).filter(Document.user_id == user.id).subquery()
+    user_doc_ids = db.query(Document.id).filter(Document.user_id == user_id).subquery()
 
     total_docs = db.query(func.count(Document.id)).filter(
-        Document.user_id == user.id
+        Document.user_id == user_id
     ).scalar() or 0
 
     docs_completed = db.query(func.count(Document.id)).filter(
-        Document.user_id == user.id, Document.status == "completed"
+        Document.user_id == user_id, Document.status == "completed"
     ).scalar() or 0
 
     docs_pending = db.query(func.count(Document.id)).filter(
-        Document.user_id == user.id, Document.status == "pending"
+        Document.user_id == user_id, Document.status == "pending"
     ).scalar() or 0
 
     docs_failed = db.query(func.count(Document.id)).filter(
-        Document.user_id == user.id, Document.status == "failed"
+        Document.user_id == user_id, Document.status == "failed"
     ).scalar() or 0
 
     # ── Single-doc contradictions ──
@@ -72,7 +70,7 @@ async def get_dashboard_stats(
     # ── Cross-doc contradictions (from user's comparison sessions) ──
     user_comparison_ids = (
         db.query(ComparisonSession.id)
-        .filter(ComparisonSession.user_id == user.id)
+        .filter(ComparisonSession.user_id == user_id)
         .subquery()
     )
 
@@ -113,49 +111,66 @@ async def get_dashboard_stats(
         Clause.document_id.in_(db.query(user_doc_ids))
     ).scalar() or 0
 
-    # ── Average analysis duration (completed single-doc analyses) ──
-    completed_docs = db.query(Document).filter(
-        Document.user_id == user.id,
-        Document.status == "completed",
-        Document.analysis_start_time.isnot(None),
-        Document.analysis_end_time.isnot(None),
-    ).all()
+    # ── Average analysis duration (SQL aggregate — avoids loading all rows) ──
+    from sqlalchemy import extract as sa_extract
 
-    durations = [
-        (d.analysis_end_time - d.analysis_start_time).total_seconds()
-        for d in completed_docs
-    ]
+    avg_doc_dur = (
+        db.query(
+            func.avg(
+                sa_extract('epoch', Document.analysis_end_time)
+                - sa_extract('epoch', Document.analysis_start_time)
+            )
+        )
+        .filter(
+            Document.user_id == user_id,
+            Document.status == "completed",
+            Document.analysis_start_time.isnot(None),
+            Document.analysis_end_time.isnot(None),
+        )
+        .scalar()
+    )
+    avg_doc_dur = float(avg_doc_dur) if avg_doc_dur is not None else 0.0
 
-    # Include completed comparison session durations
-    completed_sessions = db.query(ComparisonSession).filter(
-        ComparisonSession.user_id == user.id,
-        ComparisonSession.status == "completed",
-        ComparisonSession.started_at.isnot(None),
-        ComparisonSession.completed_at.isnot(None),
-    ).all()
-
-    durations += [
-        (s.completed_at - s.started_at).total_seconds()
-        for s in completed_sessions
-    ]
-
-    avg_duration = round(sum(durations) / len(durations), 1) if durations else 0.0
+    avg_comp_dur = (
+        db.query(
+            func.avg(
+                sa_extract('epoch', ComparisonSession.completed_at)
+                - sa_extract('epoch', ComparisonSession.started_at)
+            )
+        )
+        .filter(
+            ComparisonSession.user_id == user_id,
+            ComparisonSession.status == "completed",
+            ComparisonSession.started_at.isnot(None),
+            ComparisonSession.completed_at.isnot(None),
+        )
+        .scalar()
+    )
+    avg_comp_dur = float(avg_comp_dur) if avg_comp_dur is not None else 0.0
 
     # ── Comparison sessions count ──
     total_comparisons = db.query(func.count(ComparisonSession.id)).filter(
-        ComparisonSession.user_id == user.id,
+        ComparisonSession.user_id == user_id,
     ).scalar() or 0
 
     comparisons_completed = db.query(func.count(ComparisonSession.id)).filter(
-        ComparisonSession.user_id == user.id,
+        ComparisonSession.user_id == user_id,
         ComparisonSession.status == "completed",
     ).scalar() or 0
+
+    # Weighted average across both
+    count_doc = docs_completed
+    count_comp = comparisons_completed
+    total_count = count_doc + count_comp
+    avg_duration = round(
+        (avg_doc_dur * count_doc + avg_comp_dur * count_comp) / total_count, 1
+    ) if total_count > 0 else 0.0
 
     # ── Recent activity (last 5 single-doc + last 5 comparisons, merged & sorted) ──
     recent_docs = (
         db.query(Document)
         .filter(
-            Document.user_id == user.id,
+            Document.user_id == user_id,
             Document.status.in_(["completed", "failed"]),
         )
         .order_by(Document.analysis_end_time.desc())
@@ -164,15 +179,24 @@ async def get_dashboard_stats(
     )
 
     recent_activity = []
-    for doc in recent_docs:
-        doc_contradictions = db.query(func.count(Contradiction.id)).filter(
-            Contradiction.document_id == doc.id
-        ).scalar() or 0
 
+    # Batch query contradiction counts for recent docs (avoids N+1)
+    recent_doc_ids = [doc.id for doc in recent_docs]
+    if recent_doc_ids:
+        contradiction_counts = dict(
+            db.query(Contradiction.document_id, func.count(Contradiction.id))
+            .filter(Contradiction.document_id.in_(recent_doc_ids))
+            .group_by(Contradiction.document_id)
+            .all()
+        )
+    else:
+        contradiction_counts = {}
+
+    for doc in recent_docs:
         recent_activity.append({
             "document_name": doc.name,
             "status": doc.status,
-            "contradictions_found": doc_contradictions,
+            "contradictions_found": contradiction_counts.get(doc.id, 0),
             "date": str(doc.analysis_end_time or doc.upload_date),
             "activity_type": "single",
         })
@@ -181,7 +205,7 @@ async def get_dashboard_stats(
     recent_comparisons = (
         db.query(ComparisonSession)
         .filter(
-            ComparisonSession.user_id == user.id,
+            ComparisonSession.user_id == user_id,
             ComparisonSession.status.in_(["completed", "failed"]),
         )
         .order_by(ComparisonSession.completed_at.desc())
@@ -189,16 +213,32 @@ async def get_dashboard_stats(
         .all()
     )
 
+    # Batch query cross-contradiction counts and doc names for comparisons (avoids N+1)
+    recent_comp_ids = [s.id for s in recent_comparisons]
+    if recent_comp_ids:
+        cross_counts = dict(
+            db.query(CrossContradiction.comparison_id, func.count(CrossContradiction.id))
+            .filter(CrossContradiction.comparison_id.in_(recent_comp_ids))
+            .group_by(CrossContradiction.comparison_id)
+            .all()
+        )
+    else:
+        cross_counts = {}
+
+    # Collect all doc IDs referenced by comparison sessions for batch name lookup
+    all_comp_doc_ids = set()
     for session in recent_comparisons:
         doc_ids = json.loads(session.document_ids) if session.document_ids else []
-        doc_names = []
-        if doc_ids:
-            docs = db.query(Document.name).filter(Document.id.in_(doc_ids)).all()
-            doc_names = [d.name for d in docs]
+        all_comp_doc_ids.update(doc_ids)
+    if all_comp_doc_ids:
+        doc_name_rows = db.query(Document.id, Document.name).filter(Document.id.in_(all_comp_doc_ids)).all()
+        doc_name_map = {d_id: d_name for d_id, d_name in doc_name_rows}
+    else:
+        doc_name_map = {}
 
-        cross_count = db.query(func.count(CrossContradiction.id)).filter(
-            CrossContradiction.comparison_id == session.id
-        ).scalar() or 0
+    for session in recent_comparisons:
+        doc_ids = json.loads(session.document_ids) if session.document_ids else []
+        doc_names = [doc_name_map.get(did, "Unknown") for did in doc_ids]
 
         display_name = " vs ".join(doc_names[:2])
         if len(doc_names) > 2:
@@ -207,7 +247,7 @@ async def get_dashboard_stats(
         recent_activity.append({
             "document_name": display_name or "Multi-doc comparison",
             "status": session.status,
-            "contradictions_found": cross_count,
+            "contradictions_found": cross_counts.get(session.id, 0),
             "date": str(session.completed_at or session.created_at),
             "activity_type": "comparison",
         })

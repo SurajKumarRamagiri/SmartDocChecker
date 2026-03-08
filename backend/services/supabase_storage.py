@@ -1,7 +1,6 @@
-"""
-Supabase Storage service for uploading and managing files.
-"""
+"""Supabase Storage service for uploading and managing files."""
 import logging
+import threading
 from supabase import create_client, Client
 
 from config import settings
@@ -9,18 +8,21 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 _client: Client | None = None
+_client_lock = threading.Lock()
 
 
 def _get_client() -> Client:
-    """Lazy-initialize the Supabase client."""
+    """Lazy-initialize the Supabase client (thread-safe)."""
     global _client
     if _client is None:
-        if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
-            raise RuntimeError(
-                "SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in .env"
-            )
-        _client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
-        logger.info("Supabase client initialized")
+        with _client_lock:
+            if _client is None:  # double-checked locking
+                if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
+                    raise RuntimeError(
+                        "SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in .env"
+                    )
+                _client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+                logger.info("Supabase client initialized")
     return _client
 
 
@@ -70,7 +72,12 @@ def get_signed_url(
     client = _get_client()
     bucket_name = bucket or settings.SUPABASE_BUCKET
     res = client.storage.from_(bucket_name).create_signed_url(file_path, expires_in)
-    return res.get("signedURL", "")
+    signed_url = res.get("signedURL", "")
+    if not signed_url:
+        raise RuntimeError(
+            f"Failed to generate signed URL for '{file_path}' in bucket '{bucket_name}'"
+        )
+    return signed_url
 
 
 def delete_file(file_path: str, bucket: str | None = None) -> None:

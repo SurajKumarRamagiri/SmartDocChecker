@@ -33,7 +33,7 @@ export default function AuthPage() {
         else if (!/\S+@\S+\.\S+/.test(email)) errs.email = 'Enter a valid email address';
 
         if (!password) errs.password = 'Password is required';
-        else if (password.length < 6) errs.password = 'Password must be at least 6 characters';
+        else if (password.length < 8) errs.password = 'Password must be at least 8 characters';
 
         if (mode === 'signup') {
             if (!name.trim()) errs.name = 'Name is required';
@@ -58,7 +58,7 @@ export default function AuthPage() {
             } else {
                 await signup(name, email, password);
             }
-            navigate('/app', { replace: true });
+            navigate(from, { replace: true });
         } catch (err) {
             setError(err.message);
         } finally {

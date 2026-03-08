@@ -4,23 +4,61 @@ import os
 import signal
 import sys
 
+def ensure_backend_venv(backend_dir):
+    """Create venv and install requirements if venv doesn't exist."""
+    venv_dir = os.path.join(backend_dir, "venv")
+    if sys.platform == "win32":
+        python_in_venv = os.path.join(venv_dir, "Scripts", "python.exe")
+        pip_in_venv = os.path.join(venv_dir, "Scripts", "pip.exe")
+    else:
+        python_in_venv = os.path.join(venv_dir, "bin", "python")
+        pip_in_venv = os.path.join(venv_dir, "bin", "pip")
+
+    if not os.path.exists(python_in_venv):
+        print("Creating backend virtual environment...")
+        subprocess.run([sys.executable, "-m", "venv", venv_dir], check=True)
+        print("Installing backend dependencies (this may take a few minutes)...")
+        subprocess.run([python_in_venv, "-m", "pip", "install", "--upgrade", "pip"], check=True)
+        req_file = os.path.join(backend_dir, "requirements.txt")
+        subprocess.run([python_in_venv, "-m", "pip", "install", "-r", req_file], check=True)
+        # Install spaCy model
+        subprocess.run([python_in_venv, "-m", "spacy", "download", "en_core_web_sm"],
+                       check=False)
+        print("Backend dependencies installed successfully!")
+    else:
+        print("Backend venv already exists.")
+    return venv_dir
+
 def run_services():
     # Define paths
     base_dir = os.path.dirname(os.path.abspath(__file__))
     backend_dir = os.path.join(base_dir, "backend")
     frontend_dir = os.path.join(base_dir, "frontend")
 
-    print("Starting services...")
+    print("=" * 50)
+    print("  SmartDocChecker — Local Development Launcher")
+    print("=" * 50)
+
+    # Ensure backend venv exists
+    venv_dir = ensure_backend_venv(backend_dir)
+
+    # Determine uvicorn path
+    if sys.platform == "win32":
+        uvicorn_path = os.path.join(venv_dir, "Scripts", "uvicorn.exe")
+    else:
+        uvicorn_path = os.path.join(venv_dir, "bin", "uvicorn")
+
+    if not os.path.exists(uvicorn_path):
+        print(f"ERROR: uvicorn not found at {uvicorn_path}")
+        print("Try deleting backend/venv and running again.")
+        sys.exit(1)
 
     # Start Backend
-    print("Starting Backend (FastAPI)...")
-    uvicorn_path = os.path.join(base_dir, "backend", "venv", "Scripts", "uvicorn.exe")
+    print("\nStarting Backend (FastAPI)...")
     backend_process = subprocess.Popen(
-        [uvicorn_path, "main:app", "--reload"],
+        [uvicorn_path, "main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
         cwd=backend_dir,
-        shell=True
     )
-
 
     # Start Frontend
     print("Starting Frontend (Vite)...")
@@ -28,7 +66,6 @@ def run_services():
     frontend_process = subprocess.Popen(
         [npm_cmd, "run", "dev"],
         cwd=frontend_dir,
-        shell=True
     )
 
     print("\nServices are running!")

@@ -12,18 +12,16 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from config import settings
 from api.router import api_router
 from db.session import engine, SessionLocal
 from db.base import Base
+from dependencies import limiter
 
 # ── Import models so Base.metadata knows about them ──
 from models.user import User
@@ -37,16 +35,17 @@ from models.cross_contradiction import CrossContradiction
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Rate Limiter ──
-limiter = Limiter(key_func=get_remote_address, default_limits=[settings.RATE_LIMIT_DEFAULT])
-
 
 # ── Lifespan: startup & shutdown logic ──
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: create tables, warm models, seed admin."""
-    logger.info("Creating database tables (if they don't exist)…")
-    Base.metadata.create_all(bind=engine)
+    try:
+        logger.info("Creating database tables (if they don't exist)…")
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        logger.error(f"Database table creation failed: {e}")
+        logger.warning("App will start without DB — some endpoints may fail.")
 
     from core.hashing import hash_password
 
@@ -54,31 +53,44 @@ async def lifespan(app: FastAPI):
     try:
         # ── Model Warming ──
         logger.info("Warming AI models…")
-        from services.embedding_service import _load_sbert_model
-        from services.nli_service import _load_nli_model
-        _load_sbert_model()
-        _load_nli_model()
-        logger.info("AI models warmed and ready.")
+        try:
+            from services.embedding_service import _load_sbert_model
+            from services.nli_service import _load_nli_model
+            _load_sbert_model()
+            _load_nli_model()
+            logger.info("AI models warmed and ready.")
+        except Exception as e:
+            logger.error(f"Model warming failed: {e}")
+            logger.warning("App will start without pre-loaded models.")
 
-        admin = db.query(User).filter(User.email == "admin@smartdoc.com").first()
-        if not admin:
-            import os
-            admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
-            admin = User(
-                name="Admin",
-                email="admin@smartdoc.com",
-                hashed_password=hash_password(admin_password),
-            )
-            db.add(admin)
-            db.commit()
-            logger.info("Seeded default admin user: admin@smartdoc.com")
-            if admin_password == "Admin123!":
-                logger.warning(
-                    "⚠  Admin seeded with DEFAULT password. "
-                    "Set ADMIN_PASSWORD env var for production!"
-                )
-        else:
-            logger.info("Admin user already exists, skipping seed.")
+        try:
+            admin = db.query(User).filter(User.email == "admin@smartdoc.com").first()
+            if not admin:
+                admin_password = os.environ.get("ADMIN_PASSWORD")
+                if not admin_password:
+                    if settings.DEBUG:
+                        admin_password = "Admin123!"
+                        logger.warning(
+                            "⚠  ADMIN_PASSWORD not set — using insecure default (DEBUG mode only)"
+                        )
+                    else:
+                        logger.warning(
+                            "⚠  ADMIN_PASSWORD env var not set. "
+                            "Skipping admin seed in production."
+                        )
+                if admin_password:
+                    admin = User(
+                        name="Admin",
+                        email="admin@smartdoc.com",
+                        hashed_password=hash_password(admin_password),
+                    )
+                    db.add(admin)
+                    db.commit()
+                    logger.info("Seeded default admin user: admin@smartdoc.com")
+            else:
+                logger.info("Admin user already exists, skipping seed.")
+        except Exception as e:
+            logger.error(f"Admin seeding failed: {e}")
     finally:
         db.close()
 
@@ -93,9 +105,9 @@ app = FastAPI(
     description="Enterprise-grade contradiction detection API",
     version=settings.APP_VERSION,
     lifespan=lifespan,
-    # Disable interactive API docs in production
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    root_path=os.environ.get("ROOT_PATH", ""),
 )
 
 # ── Rate Limiting Middleware ──
@@ -103,6 +115,12 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ──
+if not settings.DEBUG and any("localhost" in o for o in settings.CORS_ORIGINS):
+    logger.warning(
+        "⚠  CORS_ORIGINS contains localhost URLs in production. "
+        "Set CORS_ORIGINS in .env for your deployment domain."
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -129,4 +147,15 @@ async def add_security_headers(request: Request, call_next):
 
 # ── Include all API routes ──
 app.include_router(api_router)
+
+
+# ── Root health check (required by HF Spaces) ──
+@app.get("/", include_in_schema=False)
+def root():
+    return {"status": "ok", "app": settings.APP_NAME, "version": settings.APP_VERSION}
+
+
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}
 

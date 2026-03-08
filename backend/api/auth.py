@@ -4,18 +4,18 @@ Authentication API routes.
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Request
 from sqlalchemy.orm import Session
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from schemas.user_schema import UserRegister, UserLogin, UserOut, TokenResponse
 from core.hashing import hash_password, verify_password
 from core.jwt_handler import create_access_token
-from dependencies import get_current_user, get_db
+from dependencies import get_current_user, get_db, limiter
 from models.user import User
 from config import settings
 
 logger = logging.getLogger(__name__)
-limiter = Limiter(key_func=get_remote_address)
+
+# Pre-computed dummy hash for constant-time login (prevents email enumeration)
+_DUMMY_HASH = hash_password("dummy-password-for-timing")
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -37,7 +37,7 @@ async def register(request: Request, body: UserRegister, db: Session = Depends(g
     db.refresh(user)
 
     token = create_access_token({"sub": user.email, "name": user.name, "user_id": user.id})
-    logger.info(f"New user registered: {user.email}")
+    logger.info(f"New user registered: id={user.id}")
 
     return TokenResponse(
         access_token=token,
@@ -50,11 +50,15 @@ async def register(request: Request, body: UserRegister, db: Session = Depends(g
 @limiter.limit(settings.RATE_LIMIT_AUTH)
 async def login(request: Request, body: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == body.email).first()
-    if not user or not verify_password(body.password, user.hashed_password):
+    if not user:
+        # Always run verify_password to prevent timing-based email enumeration
+        verify_password(body.password, _DUMMY_HASH)
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     token = create_access_token({"sub": user.email, "name": user.name, "user_id": user.id})
-    logger.info(f"User logged in: {user.email}")
+    logger.info(f"User logged in: id={user.id}")
 
     return TokenResponse(
         access_token=token,

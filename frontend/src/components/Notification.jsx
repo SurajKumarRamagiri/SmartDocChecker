@@ -23,7 +23,7 @@ const COLORS = {
     info: '#2563eb',
 };
 
-export default function Notification({ message, type = 'info', onClose }) {
+export default function Notification({ message, type = 'info', onClose, index = 0 }) {
     const [exiting, setExiting] = useState(false);
 
     const dismiss = useCallback(() => {
@@ -41,7 +41,7 @@ export default function Notification({ message, type = 'info', onClose }) {
             className="notification-toast"
             style={{
                 position: 'fixed',
-                top: '100px',
+                top: `${100 + index * 80}px`,
                 right: '2rem',
                 background: COLORS[type] || COLORS.info,
                 color: 'white',
@@ -64,6 +64,7 @@ export default function Notification({ message, type = 'info', onClose }) {
             </div>
             <button
                 onClick={dismiss}
+                aria-label="Dismiss notification"
                 style={{
                     background: 'none',
                     border: 'none',

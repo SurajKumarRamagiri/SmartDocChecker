@@ -6,27 +6,32 @@ contradiction detection (dates, money, people, orgs, locations, etc.).
 """
 import logging
 import re
+import threading
 from typing import List, Dict, Optional, Tuple
-from functools import lru_cache
+
+from constants import STOP_WORDS
 
 logger = logging.getLogger(__name__)
 
 _nlp = None
+_nlp_lock = threading.Lock()
 
 
 def _load_nlp():
-    """Lazy-load the spaCy model once."""
+    """Lazy-load the spaCy model once (thread-safe)."""
     global _nlp
     if _nlp is None:
-        import spacy
-        try:
-            _nlp = spacy.load("en_core_web_sm", disable=["parser", "lemmatizer"])
-        except OSError:
-            logger.warning("spaCy model 'en_core_web_sm' not found – NER features disabled")
-            return None
-        # Increase max_length for long clauses
-        _nlp.max_length = 200_000
-        logger.info("Loaded spaCy NER model: en_core_web_sm")
+        with _nlp_lock:
+            if _nlp is None:  # double-checked locking
+                import spacy
+                try:
+                    _nlp = spacy.load("en_core_web_sm", disable=["parser", "lemmatizer"])
+                except OSError:
+                    logger.warning("spaCy model 'en_core_web_sm' not found – NER features disabled")
+                    return None
+                # Increase max_length for long clauses
+                _nlp.max_length = 200_000
+                logger.info("Loaded spaCy NER model: en_core_web_sm")
     return _nlp
 
 
@@ -141,14 +146,8 @@ def check_entity_contradictions(clause_a, clause_b,
         return []
 
     # ── Guard: require topical overlap (content words only) ──
-    _stop = {'the','a','an','is','are','was','were','be','been','being',
-             'have','has','had','do','does','did','will','would','shall',
-             'should','may','might','can','could','of','in','to','for',
-             'and','or','but','on','at','by','with','from','as','into',
-             'that','this','it','its','not','no','if','so','than','then',
-             'such','also','any','all','each','every','both','other'}
-    words_a = {w for w in words_a_list if w not in _stop and len(w) > 2}
-    words_b = {w for w in words_b_list if w not in _stop and len(w) > 2}
+    words_a = {w for w in words_a_list if w not in STOP_WORDS and len(w) > 2}
+    words_b = {w for w in words_b_list if w not in STOP_WORDS and len(w) > 2}
     if not words_a or not words_b:
         return []
     overlap = len(words_a & words_b) / max(len(words_a), len(words_b))

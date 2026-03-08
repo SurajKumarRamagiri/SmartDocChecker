@@ -10,97 +10,18 @@ from models.clause import Clause
 from models.contradiction import Contradiction
 from utils.text_extractor import extract_and_clean_text
 from utils.clause_segmenter import segment_clauses
+from utils.description_builder import build_semantic_description
 from services.supabase_storage import get_signed_url
 from services.embedding_service import generate_embeddings_batch
 from services.rule_checker import check_contradictions_batch
 from services.nli_service import batch_nli_check
 from services.ner_service import extract_entities_batch
+from constants import STOP_WORDS
+from config import settings
 import httpx
+import numpy as np
 
 logger = logging.getLogger(__name__)
-
-
-def _build_semantic_description(clause_a_id, clause_b_id, nli_pairs, confidence_pct):
-    """Build a human-readable description for a semantic contradiction.
-
-    Extracts the best contiguous span of differing words from each clause
-    so the description reads like natural text, not a bag of words.
-    """
-    _stop = {'the','a','an','is','are','was','were','be','been','being',
-             'have','has','had','do','does','did','will','would','shall',
-             'should','may','might','can','could','of','in','to','for',
-             'and','or','but','on','at','by','with','from','as','into',
-             'that','this','it','its','not','no','if','so','than','then',
-             'such','also','any','all','each','every','both','other',
-             'must','minimum','maximum'}
-
-    def _extract_best_span(original_text, unique_words, max_words=12):
-        """Find the longest contiguous run of unique content words in
-        the *original* text and return the span with one word of leading
-        context, preserving original casing and punctuation."""
-        orig_words = original_text.split()
-        clean = [w.strip('.,;:!?\'"()').lower() for w in orig_words]
-
-        # Mark each position that contains a unique content word
-        hits = [c in unique_words for c in clean]
-
-        # Find the longest contiguous run of True values
-        best_start = best_end = 0
-        cur_start = None
-        for i, hit in enumerate(hits):
-            if hit:
-                if cur_start is None:
-                    cur_start = i
-                run_len = i - cur_start + 1
-                if run_len > (best_end - best_start):
-                    best_start, best_end = cur_start, i + 1
-            else:
-                cur_start = None
-
-        if best_start == best_end:
-            # No contiguous run found — fall back to first few unique words in order
-            fallback = [w for w, c in zip(orig_words, clean) if c in unique_words]
-            return ' '.join(fallback[:max_words])
-
-        # Add one word of leading context for readability
-        ctx_start = max(0, best_start - 1)
-        span = orig_words[ctx_start:best_end]
-
-        # If span is too long, trim to max_words from the start
-        if len(span) > max_words:
-            span = span[:max_words]
-
-        return ' '.join(span).strip('.,;:!?\'"()')
-
-    # Find the matching pair texts
-    text_a = text_b = None
-    for t_a, t_b, id_a, id_b in nli_pairs:
-        if id_a == clause_a_id and id_b == clause_b_id:
-            text_a, text_b = t_a, t_b
-            break
-        if id_a == clause_b_id and id_b == clause_a_id:
-            text_a, text_b = t_b, t_a
-            break
-
-    if not text_a or not text_b:
-        return f"Semantic conflict detected (confidence: {confidence_pct:.0f}%)"
-
-    # Build cleaned word sets (lowered) for diff computation
-    words_a_clean = [w.strip('.,;:!?\'"()').lower() for w in text_a.split()]
-    words_b_clean = [w.strip('.,;:!?\'"()').lower() for w in text_b.split()]
-    set_a = {w for w in words_a_clean if w not in _stop and len(w) > 2}
-    set_b = {w for w in words_b_clean if w not in _stop and len(w) > 2}
-
-    unique_a = set_a - set_b
-    unique_b = set_b - set_a
-
-    span_a = _extract_best_span(text_a, unique_a)
-    span_b = _extract_best_span(text_b, unique_b)
-
-    if span_a and span_b:
-        return f"Semantic conflict: '{span_a}' vs '{span_b}'"
-    return f"Semantic conflict detected (confidence: {confidence_pct:.0f}%)"
-
 
 from db.session import SessionLocal
 
@@ -134,6 +55,7 @@ def process_document(document_id: str):
         signed_url = get_signed_url(doc.file_path, expires_in=300)
         with httpx.Client() as client:
             response = client.get(signed_url)
+            response.raise_for_status()
             file_content = response.content
         
         # 3. Cleanup existing data (prevent duplication)
@@ -151,6 +73,15 @@ def process_document(document_id: str):
         _update_stage(db, doc, "segmenting", 25)
         clause_texts = segment_clauses(raw_text)
         logger.info(f"Segmented {len(clause_texts)} clauses")
+
+        # Guard against pathologically long documents
+        MAX_CLAUSES = 500
+        if len(clause_texts) > MAX_CLAUSES:
+            logger.warning(
+                f"Document {document_id} has {len(clause_texts)} clauses, "
+                f"capping at {MAX_CLAUSES}"
+            )
+            clause_texts = clause_texts[:MAX_CLAUSES]
         
         # 5. Bulk insert clauses
         clauses = []
@@ -180,13 +111,14 @@ def process_document(document_id: str):
         for clause, embedding in zip(clauses, embeddings):
             clause.embedding = embedding
         
-        # Update search vectors
-        logger.info("Updating search vectors for full-text search...")
-        from sqlalchemy import text
-        db.execute(
-            text("UPDATE clauses SET search_vector = to_tsvector('english', text) WHERE document_id = :doc_id"),
-            {"doc_id": document_id}
-        )
+        # Update search vectors (PostgreSQL only)
+        if not settings.DATABASE_URL.startswith("sqlite"):
+            logger.info("Updating search vectors for full-text search...")
+            from sqlalchemy import text
+            db.execute(
+                text("UPDATE clauses SET search_vector = to_tsvector('english', text) WHERE document_id = :doc_id"),
+                {"doc_id": document_id}
+            )
         db.commit()
         
         # 7. NER – extract named entities for all clauses (batch)
@@ -202,7 +134,6 @@ def process_document(document_id: str):
         logger.info("NER extraction complete")
 
         # 8. Find similar clause pairs — vectorized matrix multiply (fast)
-        import numpy as np
         _update_stage(db, doc, "similarity", 65)
         logger.info("Identifying candidate contradiction pairs (vectorized)...")
         similar_pairs = []
@@ -250,15 +181,10 @@ def process_document(document_id: str):
 
         # Pre-filter: drop pairs with very low word overlap (unrelated topics)
         if nli_pairs:
-            _stop = {'the','a','an','is','are','was','were','be','been','being',
-                     'have','has','had','do','does','did','will','would','shall',
-                     'should','may','might','can','could','of','in','to','for',
-                     'and','or','but','on','at','by','with','from','as','into',
-                     'that','this','it','its','not','no','if','so','than','then'}
             filtered_nli = []
             for text_a, text_b, id_a, id_b in nli_pairs:
-                wa = {w for w in text_a.lower().split() if w not in _stop and len(w) > 2}
-                wb = {w for w in text_b.lower().split() if w not in _stop and len(w) > 2}
+                wa = {w for w in text_a.lower().split() if w not in STOP_WORDS and len(w) > 2}
+                wb = {w for w in text_b.lower().split() if w not in STOP_WORDS and len(w) > 2}
                 if wa and wb:
                     overlap = len(wa & wb) / max(len(wa), len(wb))
                     # Require substantial shared vocabulary — same/similar structure
@@ -310,10 +236,15 @@ def process_document(document_id: str):
                 c_conf = rule_v["confidence"] if is_numeric_rule and c_score < 0.50 else c_score
                 # Scale confidence to 0-100 range
                 c_conf_pct = round(c_conf * 100, 1)
+                # Use rule severity when available; derive from confidence only for semantic
+                if rule_v:
+                    c_severity = rule_v["severity"]
+                else:
+                    c_severity = "high" if c_conf_pct >= 90 else ("medium" if c_conf_pct >= 60 else "low")
                 if rule_v:
                     c_desc = rule_v["description"]
                 else:
-                    c_desc = _build_semantic_description(
+                    c_desc = build_semantic_description(
                         result["clause_a_id"], result["clause_b_id"],
                         nli_pairs, c_conf_pct
                     )
@@ -322,7 +253,7 @@ def process_document(document_id: str):
                     clause_a_id=result["clause_a_id"],
                     clause_b_id=result["clause_b_id"],
                     type=c_type,
-                    severity="high" if c_conf_pct >= 90 else "medium",
+                    severity=c_severity,
                     description=c_desc,
                     confidence=c_conf_pct,
                     document_id=document_id
@@ -344,6 +275,8 @@ def process_document(document_id: str):
             doc = db.query(Document).filter(Document.id == document_id).first()
             if doc:
                 doc.status = "failed"
+                doc.processing_stage = "failed"
+                doc.progress_percent = 0
                 db.commit()
         except Exception as inner_e:
             logger.error(f"Could not update status to failed: {inner_e}")
